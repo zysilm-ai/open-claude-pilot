@@ -3,7 +3,7 @@
 import os
 import hashlib
 from pathlib import Path
-from typing import Optional, List, BinaryIO
+from typing import List, BinaryIO
 from datetime import datetime
 
 
@@ -76,7 +76,7 @@ class FileManager:
 
         return relative_path, size, file_hash
 
-    def get_file_path(self, relative_path: str) -> Optional[Path]:
+    def get_file_path(self, relative_path: str) -> Path | None:
         """
         Get absolute path for a file.
 
@@ -157,7 +157,7 @@ class FileManager:
 
 
 # Global file manager instance
-_file_manager: Optional[FileManager] = None
+_file_manager: FileManager | None = None
 
 
 def get_file_manager() -> FileManager:

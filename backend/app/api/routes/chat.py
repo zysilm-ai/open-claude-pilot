@@ -1,6 +1,5 @@
 """Chat session and message API routes."""
 
-from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, status, WebSocket, WebSocketDisconnect
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
@@ -24,7 +23,7 @@ router = APIRouter(prefix="/chats", tags=["chat"])
 # Chat Session endpoints
 @router.get("", response_model=ChatSessionListResponse)
 async def list_chat_sessions(
-    project_id: Optional[str] = None,
+    project_id: str | None = None,
     skip: int = 0,
     limit: int = 100,
     db: AsyncSession = Depends(get_db),

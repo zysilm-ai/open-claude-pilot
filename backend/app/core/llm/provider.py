@@ -1,7 +1,7 @@
 """LLM provider abstraction using LiteLLM."""
 
 import os
-from typing import List, Dict, Any, AsyncIterator, Optional
+from typing import List, Dict, Any, AsyncIterator
 from litellm import acompletion
 import litellm
 
@@ -16,7 +16,7 @@ class LLMProvider:
         self,
         provider: str = "openai",
         model: str = "gpt-4",
-        api_key: Optional[str] = None,
+        api_key: str | None = None,
         **config
     ):
         """
@@ -97,7 +97,7 @@ class LLMProvider:
     async def generate_stream(
         self,
         messages: List[Dict[str, str]],
-        tools: Optional[List[Dict[str, Any]]] = None,
+        tools: List[Dict[str, Any | None]] = None,
         **kwargs
     ) -> AsyncIterator[str | Dict[str, Any]]:
         """
@@ -155,7 +155,7 @@ def create_llm_provider(
     provider: str,
     model: str,
     llm_config: Dict[str, Any],
-    api_key: Optional[str] = None
+    api_key: str | None = None
 ) -> LLMProvider:
     """
     Factory function to create LLM provider.

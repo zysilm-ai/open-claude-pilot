@@ -1,7 +1,6 @@
 """Chat session schemas for API validation."""
 
 from datetime import datetime
-from typing import Optional
 from pydantic import BaseModel, Field
 
 from app.models.database.chat_session import ChatSessionStatus
@@ -19,8 +18,8 @@ class ChatSessionCreate(ChatSessionBase):
 
 class ChatSessionUpdate(BaseModel):
     """Schema for updating a chat session."""
-    name: Optional[str] = Field(None, min_length=1, max_length=255)
-    status: Optional[ChatSessionStatus] = None
+    name: str | None = Field(None, min_length=1, max_length=255)
+    status: ChatSessionStatus | None = None
 
 
 class ChatSessionResponse(ChatSessionBase):
@@ -28,7 +27,7 @@ class ChatSessionResponse(ChatSessionBase):
     id: str
     project_id: str
     created_at: datetime
-    container_id: Optional[str]
+    container_id: str | None
     status: ChatSessionStatus
 
     class Config:

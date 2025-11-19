@@ -2,7 +2,7 @@
 
 import json
 import re
-from typing import Dict, List, Any, Optional, AsyncIterator
+from typing import Dict, List, Any, AsyncIterator
 from pydantic import BaseModel
 
 from app.core.agent.tools.base import ToolRegistry, ToolResult
@@ -11,18 +11,18 @@ from app.core.llm.provider import LLMProvider
 
 class AgentStep(BaseModel):
     """A single step in the agent's reasoning process."""
-    thought: Optional[str] = None
-    action: Optional[str] = None
-    action_input: Optional[Dict[str, Any]] = None
-    observation: Optional[str] = None
+    thought: str | None = None
+    action: str | None = None
+    action_input: Dict[str, Any | None] = None
+    observation: str | None = None
     step_number: int
 
 
 class AgentResponse(BaseModel):
     """Response from the agent."""
-    final_answer: Optional[str] = None
+    final_answer: str | None = None
     steps: List[AgentStep] = []
-    error: Optional[str] = None
+    error: str | None = None
     completed: bool = False
 
 
@@ -41,7 +41,7 @@ class ReActAgent:
         llm_provider: LLMProvider,
         tool_registry: ToolRegistry,
         max_iterations: int = 10,
-        system_instructions: Optional[str] = None,
+        system_instructions: str | None = None,
     ):
         """Initialize the ReAct agent.
 
@@ -88,7 +88,7 @@ Available tools will be provided as function calling options. Use them to accomp
     async def run(
         self,
         user_message: str,
-        conversation_history: Optional[List[Dict[str, str]]] = None,
+        conversation_history: List[Dict[str, str | None]] = None,
     ) -> AsyncIterator[Dict[str, Any]]:
         """Run the agent on a user message.
 

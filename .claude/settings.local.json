@@ -17,7 +17,14 @@
       "Bash(python /tmp/test_agent_system.py:*)",
       "Bash(python -c:*)",
       "Bash(sqlite3:*)",
-      "Bash(python /tmp/test_phase5_agent_config.py:*)"
+      "Bash(python /tmp/test_phase5_agent_config.py:*)",
+      "Bash(poetry --version:*)",
+      "Bash(poetry install:*)",
+      "Bash(poetry lock:*)",
+      "Bash(poetry run python:*)",
+      "Bash(PORT=8001 poetry run python:*)",
+      "Bash(poetry export:*)",
+      "Bash(PORT=8002 poetry run python:*)"
     ],
     "deny": [],
     "ask": []

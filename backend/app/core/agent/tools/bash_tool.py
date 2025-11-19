@@ -1,6 +1,6 @@
 """Bash command execution tool for agent."""
 
-from typing import List, Optional
+from typing import List
 from app.core.agent.tools.base import Tool, ToolParameter, ToolResult
 from app.core.sandbox.container import SandboxContainer
 from app.core.sandbox.security import sanitize_command

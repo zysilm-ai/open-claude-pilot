@@ -1,7 +1,6 @@
 """File schemas for API validation."""
 
 from datetime import datetime
-from typing import Optional
 from pydantic import BaseModel, Field
 
 from app.models.database.file import FileType
@@ -19,9 +18,9 @@ class FileResponse(FileBase):
     id: str
     project_id: str
     size: int
-    mime_type: Optional[str]
+    mime_type: str | None
     uploaded_at: datetime
-    hash: Optional[str]
+    hash: str | None
 
     class Config:
         from_attributes = True

@@ -2,7 +2,7 @@
 
 import os
 import asyncio
-from typing import Optional, Dict
+from typing import Dict
 from pathlib import Path
 import docker
 from docker.errors import DockerException, ImageNotFound
@@ -96,7 +96,7 @@ class ContainerPoolManager:
         self,
         session_id: str,
         env_type: str = "python3.11",
-        environment_config: Optional[Dict] = None
+        environment_config: Dict | None = None
     ) -> SandboxContainer:
         """
         Create a new container for a session.
@@ -173,7 +173,7 @@ class ContainerPoolManager:
         except Exception as e:
             raise Exception(f"Failed to create container: {e}")
 
-    async def get_container(self, session_id: str) -> Optional[SandboxContainer]:
+    async def get_container(self, session_id: str) -> SandboxContainer | None:
         """
         Get container for a session.
 
@@ -230,7 +230,7 @@ class ContainerPoolManager:
         for session_id in session_ids:
             await self.destroy_container(session_id)
 
-    def get_container_stats(self, session_id: str) -> Optional[Dict]:
+    def get_container_stats(self, session_id: str) -> Dict | None:
         """
         Get container resource usage stats.
 
@@ -251,7 +251,7 @@ class ContainerPoolManager:
 
 
 # Global container pool manager instance
-_container_manager: Optional[ContainerPoolManager] = None
+_container_manager: ContainerPoolManager | None = None
 
 
 def get_container_manager() -> ContainerPoolManager:

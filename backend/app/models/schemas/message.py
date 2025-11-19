@@ -1,7 +1,7 @@
 """Message schemas for API validation."""
 
 from datetime import datetime
-from typing import Optional, Dict, Any
+from typing import Dict, Any
 from pydantic import BaseModel, Field
 
 from app.models.database.message import MessageRole
@@ -10,7 +10,7 @@ from app.models.database.message import MessageRole
 class MessageBase(BaseModel):
     """Base message schema."""
     content: str = Field(..., min_length=1)
-    message_metadata: Optional[Dict[str, Any]] = Field(default_factory=dict)
+    message_metadata: Dict[str, Any | None] = Field(default_factory=dict)
 
 
 class MessageCreate(MessageBase):

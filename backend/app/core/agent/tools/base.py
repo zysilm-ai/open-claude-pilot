@@ -1,7 +1,7 @@
 """Base tool interface and registry for ReAct agent."""
 
 from abc import ABC, abstractmethod
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, List
 from pydantic import BaseModel, Field
 
 
@@ -11,7 +11,7 @@ class ToolParameter(BaseModel):
     type: str  # "string", "number", "boolean", "object", "array"
     description: str
     required: bool = True
-    default: Optional[Any] = None
+    default: Any | None = None
 
 
 class ToolDefinition(BaseModel):
@@ -25,7 +25,7 @@ class ToolResult(BaseModel):
     """Result from tool execution."""
     success: bool
     output: str
-    error: Optional[str] = None
+    error: str | None = None
     metadata: Dict[str, Any] = Field(default_factory=dict)
 
 
@@ -106,7 +106,7 @@ class ToolRegistry:
         if tool_name in self._tools:
             del self._tools[tool_name]
 
-    def get(self, tool_name: str) -> Optional[Tool]:
+    def get(self, tool_name: str) -> Tool | None:
         """Get a tool by name."""
         return self._tools.get(tool_name)
 

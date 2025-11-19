@@ -2,7 +2,7 @@
 
 import os
 import asyncio
-from typing import Optional, Dict, Any, Tuple
+from typing import Dict, Any, Tuple
 import docker
 from docker.models.containers import Container as DockerContainer
 
@@ -136,7 +136,7 @@ class SandboxContainer:
             print(f"Error writing file: {e}")
             return False
 
-    def read_file(self, container_path: str) -> Optional[str]:
+    def read_file(self, container_path: str) -> str | None:
         """
         Read a file from the container.
 
