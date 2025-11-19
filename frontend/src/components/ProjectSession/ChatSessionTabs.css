@@ -1,0 +1,78 @@
+.chat-session-tabs {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px;
+}
+
+.chat-session-tab {
+  padding: 12px;
+  margin-bottom: 4px;
+  background-color: #1a1a1a;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background-color 0.2s;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+
+.chat-session-tab:hover {
+  background-color: #3a3a3a;
+}
+
+.chat-session-tab.active {
+  background-color: #0066cc;
+}
+
+.chat-session-tab.active:hover {
+  background-color: #0052a3;
+}
+
+.session-name {
+  flex: 1;
+  color: #e0e0e0;
+  font-size: 14px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-session-tab.active .session-name {
+  color: #ffffff;
+  font-weight: 500;
+}
+
+.delete-session-btn {
+  background: none;
+  color: #888;
+  font-size: 20px;
+  line-height: 1;
+  padding: 0;
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 3px;
+  transition: all 0.2s;
+  flex-shrink: 0;
+  opacity: 0;
+}
+
+.chat-session-tab:hover .delete-session-btn,
+.chat-session-tab.active .delete-session-btn {
+  opacity: 1;
+}
+
+.delete-session-btn:hover {
+  background-color: #ff4444;
+  color: white;
+}
+
+.no-sessions {
+  padding: 20px;
+  text-align: center;
+  color: #888;
+  font-size: 14px;
+}

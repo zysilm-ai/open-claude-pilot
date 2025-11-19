@@ -1,0 +1,33 @@
+FROM node:20-slim
+
+# Set working directory
+WORKDIR /workspace
+
+# Install common utilities
+RUN apt-get update && apt-get install -y \
+    git \
+    curl \
+    wget \
+    vim \
+    nano \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install common npm packages globally
+RUN npm install -g \
+    typescript \
+    ts-node \
+    nodemon \
+    eslint \
+    prettier
+
+# Create workspace structure
+RUN mkdir -p /workspace/project_files \
+    /workspace/agent_workspace \
+    /workspace/outputs
+
+# Set environment variables
+ENV NODE_ENV=development
+ENV WORKSPACE=/workspace
+
+# Default command
+CMD ["/bin/bash"]

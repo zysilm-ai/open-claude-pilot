@@ -1,0 +1,262 @@
+"""Container pool manager for efficient sandbox management."""
+
+import os
+import asyncio
+from typing import Optional, Dict
+from pathlib import Path
+import docker
+from docker.errors import DockerException, ImageNotFound
+
+from app.core.sandbox.container import SandboxContainer
+
+
+class ContainerPoolManager:
+    """Manage a pool of Docker containers for sandboxed execution."""
+
+    def __init__(self, pool_size: int = 5, workspace_base: str = "./data/workspaces"):
+        """
+        Initialize container pool manager.
+
+        Args:
+            pool_size: Maximum number of containers in pool
+            workspace_base: Base directory for workspace storage
+        """
+        self.pool_size = pool_size
+        self.workspace_base = Path(workspace_base)
+        self.workspace_base.mkdir(parents=True, exist_ok=True)
+
+        try:
+            self.docker_client = docker.from_env()
+        except DockerException as e:
+            raise Exception(f"Failed to connect to Docker: {e}")
+
+        # Track active containers by session ID
+        self.active_containers: Dict[str, SandboxContainer] = {}
+
+        # Environment type to image mapping
+        self.env_images = {
+            "python3.11": "opencodex-env-python3.11:latest",
+            "python3.12": "opencodex-env-python3.12:latest",
+            "node20": "opencodex-env-node20:latest",
+        }
+
+    def _get_workspace_path(self, session_id: str) -> Path:
+        """Get workspace path for a session."""
+        workspace = self.workspace_base / session_id
+        workspace.mkdir(parents=True, exist_ok=True)
+
+        # Create subdirectories
+        (workspace / "project_files").mkdir(exist_ok=True)
+        (workspace / "agent_workspace").mkdir(exist_ok=True)
+        (workspace / "outputs").mkdir(exist_ok=True)
+
+        return workspace
+
+    def _ensure_image_exists(self, env_type: str) -> str:
+        """
+        Ensure Docker image exists, build if necessary.
+
+        Args:
+            env_type: Environment type
+
+        Returns:
+            Image name
+
+        Raises:
+            Exception if image cannot be found or built
+        """
+        image_name = self.env_images.get(env_type)
+        if not image_name:
+            raise ValueError(f"Unknown environment type: {env_type}")
+
+        try:
+            self.docker_client.images.get(image_name)
+            return image_name
+        except ImageNotFound:
+            # Try to build the image
+            print(f"Image {image_name} not found, attempting to build...")
+            dockerfile_path = Path(__file__).parent / "environments" / f"{env_type}.Dockerfile"
+
+            if not dockerfile_path.exists():
+                raise Exception(f"Dockerfile not found: {dockerfile_path}")
+
+            try:
+                image, build_logs = self.docker_client.images.build(
+                    path=str(dockerfile_path.parent),
+                    dockerfile=str(dockerfile_path.name),
+                    tag=image_name,
+                    rm=True
+                )
+                print(f"Successfully built image: {image_name}")
+                return image_name
+            except Exception as e:
+                raise Exception(f"Failed to build image {image_name}: {e}")
+
+    async def create_container(
+        self,
+        session_id: str,
+        env_type: str = "python3.11",
+        environment_config: Optional[Dict] = None
+    ) -> SandboxContainer:
+        """
+        Create a new container for a session.
+
+        Args:
+            session_id: Chat session ID
+            env_type: Environment type
+            environment_config: Additional environment configuration
+
+        Returns:
+            SandboxContainer instance
+        """
+        # Check if container already exists for this session
+        if session_id in self.active_containers:
+            container = self.active_containers[session_id]
+            if container.is_running:
+                return container
+            else:
+                # Clean up dead container
+                await self.destroy_container(session_id)
+
+        # Ensure image exists
+        image_name = self._ensure_image_exists(env_type)
+
+        # Get workspace path
+        workspace_path = self._get_workspace_path(session_id)
+
+        # Prepare environment variables
+        env_vars = {
+            "SESSION_ID": session_id,
+            "WORKSPACE": "/workspace",
+        }
+
+        if environment_config:
+            env_vars.update(environment_config.get("env_vars", {}))
+
+        # Create container with volume mount
+        try:
+            container = self.docker_client.containers.run(
+                image_name,
+                detach=True,
+                tty=True,
+                stdin_open=True,
+                volumes={
+                    str(workspace_path.absolute()): {
+                        "bind": "/workspace",
+                        "mode": "rw"
+                    }
+                },
+                environment=env_vars,
+                network_mode="bridge",
+                mem_limit="1g",  # Memory limit
+                cpu_quota=50000,  # CPU limit (50% of one core)
+                name=f"opencodex-sandbox-{session_id}",
+            )
+
+            # Install additional packages if specified
+            if environment_config and "packages" in environment_config:
+                packages = environment_config["packages"]
+                if env_type.startswith("python"):
+                    if packages:
+                        install_cmd = f"pip install {' '.join(packages)}"
+                        container.exec_run(["bash", "-c", install_cmd])
+                elif env_type.startswith("node"):
+                    if packages:
+                        install_cmd = f"npm install -g {' '.join(packages)}"
+                        container.exec_run(["bash", "-c", install_cmd])
+
+            sandbox = SandboxContainer(container, str(workspace_path))
+            self.active_containers[session_id] = sandbox
+
+            return sandbox
+
+        except Exception as e:
+            raise Exception(f"Failed to create container: {e}")
+
+    async def get_container(self, session_id: str) -> Optional[SandboxContainer]:
+        """
+        Get container for a session.
+
+        Args:
+            session_id: Chat session ID
+
+        Returns:
+            SandboxContainer if exists, None otherwise
+        """
+        container = self.active_containers.get(session_id)
+        if container and container.is_running:
+            return container
+        return None
+
+    async def reset_container(self, session_id: str) -> bool:
+        """
+        Reset container to clean state.
+
+        Args:
+            session_id: Chat session ID
+
+        Returns:
+            Success boolean
+        """
+        container = self.active_containers.get(session_id)
+        if container:
+            return container.reset()
+        return False
+
+    async def destroy_container(self, session_id: str) -> bool:
+        """
+        Destroy container and cleanup.
+
+        Args:
+            session_id: Chat session ID
+
+        Returns:
+            Success boolean
+        """
+        container = self.active_containers.pop(session_id, None)
+        if container:
+            try:
+                container.stop()
+                container.remove()
+                return True
+            except Exception as e:
+                print(f"Error destroying container: {e}")
+                return False
+        return True
+
+    async def cleanup_all(self):
+        """Cleanup all active containers."""
+        session_ids = list(self.active_containers.keys())
+        for session_id in session_ids:
+            await self.destroy_container(session_id)
+
+    def get_container_stats(self, session_id: str) -> Optional[Dict]:
+        """
+        Get container resource usage stats.
+
+        Args:
+            session_id: Chat session ID
+
+        Returns:
+            Stats dict or None
+        """
+        container = self.active_containers.get(session_id)
+        if container and container.is_running:
+            try:
+                stats = container.container.stats(stream=False)
+                return stats
+            except Exception:
+                return None
+        return None
+
+
+# Global container pool manager instance
+_container_manager: Optional[ContainerPoolManager] = None
+
+
+def get_container_manager() -> ContainerPoolManager:
+    """Get global container pool manager instance."""
+    global _container_manager
+    if _container_manager is None:
+        _container_manager = ContainerPoolManager()
+    return _container_manager
