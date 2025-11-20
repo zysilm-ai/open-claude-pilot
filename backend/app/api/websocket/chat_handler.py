@@ -9,7 +9,7 @@ from sqlalchemy import select
 from app.models.database import ChatSession, Message, MessageRole, AgentConfiguration, AgentAction
 from app.core.llm import create_llm_provider
 from app.core.agent.executor import ReActAgent
-from app.core.agent.tools import ToolRegistry, BashTool, FileReadTool, FileWriteTool, FileEditTool
+from app.core.agent.tools import ToolRegistry, BashTool, FileReadTool, FileWriteTool, FileEditTool, SearchTool
 from app.core.sandbox.manager import get_container_manager
 
 
@@ -217,6 +217,8 @@ class ChatWebSocketHandler:
             tool_registry.register(FileWriteTool(container))
         if "file_edit" in agent_config.enabled_tools:
             tool_registry.register(FileEditTool(container))
+        if "search" in agent_config.enabled_tools:
+            tool_registry.register(SearchTool(container))
 
         # Create ReAct agent
         agent = ReActAgent(

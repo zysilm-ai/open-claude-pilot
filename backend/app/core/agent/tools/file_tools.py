@@ -24,9 +24,12 @@ class FileReadTool(Tool):
     @property
     def description(self) -> str:
         return (
-            "Read the contents of a file from the sandbox environment. "
-            "Use this to view file contents before editing or to understand existing code. "
-            "Returns the full file content as a string."
+            "Read the complete contents of a file from the sandbox environment. "
+            "Use this to: inspect code before editing, understand file structure, "
+            "view configuration files, check log outputs, or read any text-based file. "
+            "Returns the entire file content as a string. For large files, consider "
+            "using bash with 'head' or 'tail' commands. "
+            "Examples: '/workspace/script.py', 'config.json', '../README.md'."
         )
 
     @property
@@ -105,9 +108,12 @@ class FileWriteTool(Tool):
     @property
     def description(self) -> str:
         return (
-            "Write content to a file in the sandbox environment. "
-            "Creates a new file or overwrites an existing file. "
-            "Use this to create new files or completely replace file contents."
+            "Write or create a file in the sandbox environment. Creates new files or "
+            "completely overwrites existing files. Use this for: creating new source files, "
+            "writing configuration files, generating scripts, saving outputs, or replacing "
+            "entire file contents. WARNING: This overwrites existing files completely. "
+            "For targeted changes to existing files, use file_edit instead. "
+            "Parent directories are created automatically if they don't exist."
         )
 
     @property
@@ -186,10 +192,13 @@ class FileEditTool(Tool):
     @property
     def description(self) -> str:
         return (
-            "Edit an existing file by replacing specific content. "
-            "Searches for 'old_content' in the file and replaces it with 'new_content'. "
-            "This is safer than file_write for making targeted changes. "
-            "Returns an error if old_content is not found or appears multiple times."
+            "Make precise edits to existing files by replacing specific content. "
+            "Searches for 'old_content' and replaces it with 'new_content' (exactly once). "
+            "This is the PREFERRED way to modify existing files - much safer than file_write. "
+            "Use this for: fixing bugs, updating functions, modifying config values, "
+            "refactoring code, etc. The old_content must match EXACTLY (including whitespace). "
+            "Returns error if: file not found, old_content not found, or old_content appears "
+            "multiple times (ambiguous). Make old_content specific enough to match only once."
         )
 
     @property

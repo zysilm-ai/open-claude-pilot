@@ -24,10 +24,13 @@ class BashTool(Tool):
     @property
     def description(self) -> str:
         return (
-            "Execute bash commands in the sandbox environment. "
-            "Use this to run shell commands, scripts, install packages, "
-            "navigate directories, and interact with the file system. "
-            "The command will be executed in the /workspace directory by default."
+            "Execute bash commands in a secure sandbox environment. "
+            "Use this tool to: run shell commands, execute scripts, install packages with pip/npm, "
+            "compile code, run tests, manage files and directories, check system info, etc. "
+            "Commands run in /workspace/agent_workspace by default. "
+            "Examples: 'ls -la', 'python script.py', 'pip install requests', "
+            "'cat file.txt', 'mkdir new_dir', 'git status', 'node app.js', 'pytest tests/'. "
+            "Supports pipes, redirects, and multi-line commands. Timeout default: 30s."
         )
 
     @property
