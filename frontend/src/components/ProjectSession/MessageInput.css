@@ -1,7 +1,7 @@
 .message-input-container {
   padding: 20px 30px;
-  border-top: 1px solid #3a3a3a;
-  background-color: #2a2a2a;
+  border-top: 1px solid #e0e0e0;
+  background-color: #f8f8f8;
 }
 
 .message-input-wrapper {
@@ -13,10 +13,10 @@
 .message-input {
   flex: 1;
   padding: 12px 16px;
-  background-color: #1a1a1a;
-  border: 1px solid #3a3a3a;
+  background-color: #ffffff;
+  border: 1px solid #ddd;
   border-radius: 8px;
-  color: #ffffff;
+  color: #1a1a1a;
   font-size: 14px;
   font-family: inherit;
   resize: none;
@@ -27,7 +27,7 @@
 }
 
 .message-input::placeholder {
-  color: #888;
+  color: #999;
 }
 
 .message-input:focus {

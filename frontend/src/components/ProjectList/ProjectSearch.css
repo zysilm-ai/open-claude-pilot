@@ -6,16 +6,16 @@
 .search-input {
   width: 100%;
   padding: 12px 16px;
-  background-color: #2a2a2a;
-  border: 1px solid #3a3a3a;
+  background-color: #ffffff;
+  border: 1px solid #ddd;
   border-radius: 6px;
-  color: #ffffff;
+  color: #1a1a1a;
   font-size: 14px;
   transition: border-color 0.2s;
 }
 
 .search-input::placeholder {
-  color: #888;
+  color: #999;
 }
 
 .search-input:focus {

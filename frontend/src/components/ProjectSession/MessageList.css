@@ -12,6 +12,7 @@
   border-radius: 8px;
   max-width: 80%;
   animation: fadeIn 0.3s ease-in-out;
+  display: block;
 }
 
 @keyframes fadeIn {
@@ -26,12 +27,16 @@
 }
 
 .message-user {
-  align-self: flex-end;
+  align-self: flex-end !important;
+  margin-left: auto;
+  margin-right: 0;
   background-color: #0066cc;
 }
 
 .message-assistant {
-  align-self: flex-start;
+  align-self: flex-start !important;
+  margin-left: 0;
+  margin-right: auto;
   background-color: #2a2a2a;
   border: 1px solid #3a3a3a;
 }
