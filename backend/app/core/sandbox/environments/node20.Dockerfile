@@ -23,7 +23,7 @@ RUN npm install -g \
 # Create workspace structure
 RUN mkdir -p /workspace/project_files \
     /workspace/agent_workspace \
-    /workspace/outputs
+    /workspace/out
 
 # Set environment variables
 ENV NODE_ENV=development

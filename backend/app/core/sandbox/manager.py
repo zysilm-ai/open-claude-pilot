@@ -51,7 +51,7 @@ class ContainerPoolManager:
         # Create subdirectories
         (workspace / "project_files").mkdir(exist_ok=True)
         (workspace / "agent_workspace").mkdir(exist_ok=True)
-        (workspace / "outputs").mkdir(exist_ok=True)
+        (workspace / "out").mkdir(exist_ok=True)
 
         return workspace
 

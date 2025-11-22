@@ -68,10 +68,16 @@ async def health():
 
 if __name__ == "__main__":
     import uvicorn
+    import os
+
+    # Only watch app code, not workspace data directories
+    backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    reload_dirs = [os.path.join(backend_dir, "app")]
 
     uvicorn.run(
         "app.main:app",
         host=settings.host,
         port=settings.port,
         reload=True,
+        reload_dirs=reload_dirs,
     )

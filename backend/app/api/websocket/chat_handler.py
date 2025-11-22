@@ -521,8 +521,9 @@ class ChatWebSocketHandler:
         print(f"[AGENT] Has error: {has_error}")
         print(f"[AGENT] Cancelled: {cancelled}")
 
-        # Only save assistant message if there was no error and not cancelled
-        if not has_error and not cancelled:
+        # ALWAYS save assistant message and agent actions (even on error)
+        # This ensures the LLM has memory of what it tried and users can see what happened
+        if not cancelled:
             # Save assistant message with agent actions
             assistant_message = Message(
                 chat_session_id=session_id,
@@ -530,13 +531,14 @@ class ChatWebSocketHandler:
                 content=assistant_content if assistant_content else "Task completed.",
                 message_metadata={
                     "agent_mode": True,
-                    "tools_used": [a["action_type"] for a in agent_actions]
+                    "tools_used": [a["action_type"] for a in agent_actions],
+                    "has_error": has_error
                 },
             )
             self.db.add(assistant_message)
             await self.db.flush()  # Get the message ID
 
-            # Save all agent actions linked to the message
+            # Save all agent actions linked to the message (including failed ones)
             for action_data in agent_actions:
                 action = AgentAction(
                     message_id=assistant_message.id,
@@ -552,22 +554,16 @@ class ChatWebSocketHandler:
             # Send completion with message ID
             await self.websocket.send_json({
                 "type": "end",
-                "message_id": assistant_message.id
+                "message_id": assistant_message.id,
+                "has_error": has_error
             })
         else:
-            # Send completion without message ID (error or cancel case)
-            if cancelled:
-                print(f"[AGENT] Skipping message save due to cancellation")
-                await self.websocket.send_json({
-                    "type": "end",
-                    "cancelled": True
-                })
-            else:
-                print(f"[AGENT] Skipping message save due to error")
-                await self.websocket.send_json({
-                    "type": "end",
-                    "error": True
-                })
+            # Only skip save on cancellation
+            print(f"[AGENT] Skipping message save due to cancellation")
+            await self.websocket.send_json({
+                "type": "end",
+                "cancelled": True
+            })
 
     async def _get_conversation_history(self, session_id: str) -> list[Dict[str, str]]:
         """Get conversation history for a session, including agent actions."""

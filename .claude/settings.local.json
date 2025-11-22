@@ -47,7 +47,8 @@
       "Bash(xargs kill:*)",
       "Bash(node test-debug-panel.mjs:*)",
       "Bash(node test-direct-chat.mjs:*)",
-      "Bash(timeout 30 node:*)"
+      "Bash(timeout 30 node:*)",
+      "Bash(find:*)"
     ],
     "deny": [],
     "ask": []

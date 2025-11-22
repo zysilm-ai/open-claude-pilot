@@ -25,11 +25,12 @@ class FileReadTool(Tool):
     def description(self) -> str:
         return (
             "Read the complete contents of a file from the sandbox environment. "
-            "Use this to: inspect code before editing, understand file structure, "
-            "view configuration files, check log outputs, or read any text-based file. "
-            "Returns the entire file content as a string. For large files, consider "
-            "using bash with 'head' or 'tail' commands. "
-            "Examples: '/workspace/script.py', 'config.json', '../README.md'."
+            "Can read from: /workspace/project_files (user uploaded files) or "
+            "/workspace/out (files created by you). Use this to: inspect code before editing, "
+            "understand file structure, view configuration files, check log outputs, "
+            "or read any text-based file. Returns the entire file content as a string. "
+            "For large files, consider using bash with 'head' or 'tail' commands. "
+            "Examples: '/workspace/project_files/data.csv', '/workspace/out/script.py'."
         )
 
     @property
@@ -38,7 +39,7 @@ class FileReadTool(Tool):
             ToolParameter(
                 name="path",
                 type="string",
-                description="Path to the file to read (relative to /workspace or absolute path)",
+                description="Full path to the file (e.g., '/workspace/project_files/data.csv' or '/workspace/out/script.py')",
                 required=True,
             ),
         ]
@@ -108,21 +109,22 @@ class FileWriteTool(Tool):
     @property
     def description(self) -> str:
         return (
-            "Write or create a file in the sandbox environment. Creates new files or "
-            "completely overwrites existing files. Use this for: creating new source files, "
-            "writing configuration files, generating scripts, saving outputs, or replacing "
-            "entire file contents. WARNING: This overwrites existing files completely. "
-            "For targeted changes to existing files, use file_edit instead. "
-            "Parent directories are created automatically if they don't exist."
+            "Write or create a file in the output directory (/workspace/out). "
+            "Creates new files or completely overwrites existing files. "
+            "Use this for: creating new source files, writing configuration files, "
+            "generating scripts, saving outputs. You can ONLY specify the filename, "
+            "not the full path - all files are written to /workspace/out. "
+            "WARNING: This overwrites existing files completely. "
+            "For targeted changes to existing files, use file_edit instead."
         )
 
     @property
     def parameters(self) -> List[ToolParameter]:
         return [
             ToolParameter(
-                name="path",
+                name="filename",
                 type="string",
-                description="Path where the file should be written (relative to /workspace or absolute path)",
+                description="Filename to write (e.g., 'script.py', 'config.json'). Must be a simple filename without path separators.",
                 required=True,
             ),
             ToolParameter(
@@ -133,34 +135,46 @@ class FileWriteTool(Tool):
             ),
         ]
 
-    async def execute(self, path: str, content: str, **kwargs) -> ToolResult:
-        """Write content to a file in the sandbox.
+    async def execute(self, filename: str, content: str, **kwargs) -> ToolResult:
+        """Write content to a file in the output directory.
 
         Args:
-            path: Path to the file to write
+            filename: Filename to write (must be a simple filename)
             content: Content to write
 
         Returns:
             ToolResult with operation status
         """
         try:
-            # Validate file path for security
-            if not validate_file_path(path):
+            # Security: Only allow simple filenames, no path separators
+            if '/' in filename or '\\' in filename or filename.startswith('.'):
                 return ToolResult(
                     success=False,
                     output="",
-                    error=f"Invalid file path: {path}",
-                    metadata={"path": path},
+                    error=f"Invalid filename: {filename}. Only simple filenames are allowed (no path separators or leading dots).",
+                    metadata={"filename": filename},
                 )
 
+            # Construct full path in output directory
+            output_path = f"/workspace/out/{filename}"
+
             # Write file to container
-            await self._container.write_file(path, content)
+            success = await self._container.write_file(output_path, content)
+
+            if not success:
+                return ToolResult(
+                    success=False,
+                    output="",
+                    error=f"Failed to write file to output directory: {filename}",
+                    metadata={"filename": filename},
+                )
 
             return ToolResult(
                 success=True,
-                output=f"Successfully wrote {len(content)} bytes to {path}",
+                output=f"Successfully wrote {len(content)} bytes to {filename} in /workspace/out",
                 metadata={
-                    "path": path,
+                    "filename": filename,
+                    "output_path": output_path,
                     "size": len(content),
                 },
             )
@@ -170,7 +184,7 @@ class FileWriteTool(Tool):
                 success=False,
                 output="",
                 error=f"Failed to write file: {str(e)}",
-                metadata={"path": path},
+                metadata={"filename": filename},
             )
 
 

@@ -98,7 +98,7 @@ class SandboxContainer:
         except Exception as e:
             yield f"[ERROR] Execution error: {str(e)}"
 
-    def write_file(self, container_path: str, content: str) -> bool:
+    async def write_file(self, container_path: str, content: str) -> bool:
         """
         Write content to a file in the container.
 
@@ -113,30 +113,35 @@ class SandboxContainer:
             # Create a tar archive with the file
             import tarfile
             import io
+            import asyncio
 
-            tar_stream = io.BytesIO()
-            tar = tarfile.open(fileobj=tar_stream, mode='w')
+            # Run blocking I/O in thread pool
+            def _write():
+                tar_stream = io.BytesIO()
+                tar = tarfile.open(fileobj=tar_stream, mode='w')
 
-            # Add file to tar
-            file_data = content.encode('utf-8')
-            tarinfo = tarfile.TarInfo(name=os.path.basename(container_path))
-            tarinfo.size = len(file_data)
-            tar.addfile(tarinfo, io.BytesIO(file_data))
-            tar.close()
+                # Add file to tar
+                file_data = content.encode('utf-8')
+                tarinfo = tarfile.TarInfo(name=os.path.basename(container_path))
+                tarinfo.size = len(file_data)
+                tar.addfile(tarinfo, io.BytesIO(file_data))
+                tar.close()
 
-            # Put tar archive in container
-            tar_stream.seek(0)
-            self.container.put_archive(
-                path=os.path.dirname(container_path),
-                data=tar_stream
-            )
-            return True
+                # Put tar archive in container
+                tar_stream.seek(0)
+                self.container.put_archive(
+                    path=os.path.dirname(container_path),
+                    data=tar_stream
+                )
+                return True
+
+            return await asyncio.to_thread(_write)
 
         except Exception as e:
             print(f"Error writing file: {e}")
             return False
 
-    def read_file(self, container_path: str) -> str | None:
+    async def read_file(self, container_path: str) -> str | None:
         """
         Read a file from the container.
 
@@ -147,27 +152,32 @@ class SandboxContainer:
             File content or None if error
         """
         try:
-            # Get file as tar archive
-            bits, stat = self.container.get_archive(container_path)
-
-            # Extract content from tar
             import tarfile
             import io
+            import asyncio
 
-            tar_stream = io.BytesIO()
-            for chunk in bits:
-                tar_stream.write(chunk)
-            tar_stream.seek(0)
+            # Run blocking I/O in thread pool
+            def _read():
+                # Get file as tar archive
+                bits, stat = self.container.get_archive(container_path)
 
-            tar = tarfile.open(fileobj=tar_stream)
-            member = tar.next()
-            if member:
-                f = tar.extractfile(member)
-                if f:
-                    content = f.read().decode('utf-8')
-                    return content
+                # Extract content from tar
+                tar_stream = io.BytesIO()
+                for chunk in bits:
+                    tar_stream.write(chunk)
+                tar_stream.seek(0)
 
-            return None
+                tar = tarfile.open(fileobj=tar_stream)
+                member = tar.next()
+                if member:
+                    f = tar.extractfile(member)
+                    if f:
+                        content = f.read().decode('utf-8')
+                        return content
+
+                return None
+
+            return await asyncio.to_thread(_read)
 
         except Exception as e:
             print(f"Error reading file: {e}")
@@ -201,8 +211,8 @@ class SandboxContainer:
             Success boolean
         """
         try:
-            # Clean agent workspace and outputs
-            asyncio.run(self.execute("rm -rf /workspace/agent_workspace/* /workspace/outputs/*"))
+            # Clean agent workspace and out
+            asyncio.run(self.execute("rm -rf /workspace/agent_workspace/* /workspace/out/*"))
             return True
         except Exception as e:
             print(f"Error resetting container: {e}")
