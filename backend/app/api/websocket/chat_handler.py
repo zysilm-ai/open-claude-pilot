@@ -87,6 +87,15 @@ class ChatWebSocketHandler:
         agent_config: AgentConfiguration
     ):
         """Handle incoming user message and stream agent response."""
+        print(f"\n{'='*80}")
+        print(f"[CHAT HANDLER] Handling user message")
+        print(f"  Session ID: {session_id}")
+        print(f"  User Message: {content[:100]}...")
+        print(f"  LLM Provider: {agent_config.llm_provider}")
+        print(f"  LLM Model: {agent_config.llm_model}")
+        print(f"  Enabled Tools: {agent_config.enabled_tools}")
+        print(f"{'='*80}\n")
+
         # Save user message
         user_message = Message(
             chat_session_id=session_id,
@@ -105,21 +114,26 @@ class ChatWebSocketHandler:
 
         # Get conversation history
         history = await self._get_conversation_history(session_id)
+        print(f"[CHAT HANDLER] Conversation history length: {len(history)}")
 
         # Create LLM provider (with database API key lookup)
         try:
+            print(f"[CHAT HANDLER] Creating LLM provider...")
             llm_provider = await create_llm_provider_with_db(
                 provider=agent_config.llm_provider,
                 model=agent_config.llm_model,
                 llm_config=agent_config.llm_config,
                 db=self.db,
             )
+            print(f"[CHAT HANDLER] LLM provider created successfully")
 
             # Check if agent mode is enabled (has tools)
             use_agent = agent_config.enabled_tools and len(agent_config.enabled_tools) > 0
+            print(f"[CHAT HANDLER] Use agent mode: {use_agent}")
 
             if use_agent:
                 # Agent mode - use ReAct agent with tools
+                print(f"[CHAT HANDLER] Starting agent response...")
                 await self._handle_agent_response(
                     session_id,
                     content,
@@ -129,6 +143,7 @@ class ChatWebSocketHandler:
                 )
             else:
                 # Simple chat mode - direct LLM response
+                print(f"[CHAT HANDLER] Starting simple response...")
                 await self._handle_simple_response(
                     session_id,
                     history,
@@ -137,6 +152,9 @@ class ChatWebSocketHandler:
                 )
 
         except Exception as e:
+            print(f"[CHAT HANDLER] ERROR: {str(e)}")
+            import traceback
+            traceback.print_exc()
             await self.websocket.send_json({
                 "type": "error",
                 "content": f"Error: {str(e)}"
@@ -198,6 +216,35 @@ class ChatWebSocketHandler:
         agent_config: AgentConfiguration
     ):
         """Handle agent response with tool execution."""
+        try:
+            await self._handle_agent_response_impl(
+                session_id, user_message, history, llm_provider, agent_config
+            )
+        except Exception as e:
+            # Catch any exception and send error to frontend
+            error_msg = str(e)
+            print(f"[AGENT HANDLER] EXCEPTION: {error_msg}")
+            import traceback
+            traceback.print_exc()
+
+            await self.websocket.send_json({
+                "type": "error",
+                "content": f"Error: {error_msg}"
+            })
+            await self.websocket.send_json({
+                "type": "end",
+                "error": True
+            })
+
+    async def _handle_agent_response_impl(
+        self,
+        session_id: str,
+        user_message: str,
+        history: list[Dict[str, str]],
+        llm_provider,
+        agent_config: AgentConfiguration
+    ):
+        """Implementation of agent response handling."""
         # Get container manager
         container_manager = get_container_manager()
 
@@ -246,16 +293,24 @@ class ChatWebSocketHandler:
         # Stream agent execution
         assistant_content = ""
         agent_actions = []
+        has_error = False
+        error_message = None
 
         await self.websocket.send_json({"type": "start"})
+        print(f"[AGENT] Starting agent execution loop...")
 
+        event_count = 0
         async for event in agent.run(user_message, history):
+            event_count += 1
             event_type = event.get("type")
+            print(f"[AGENT] Event #{event_count}: {event_type}")
+            print(f"  Full event: {event}")
 
             if event_type == "thought":
                 # Agent is thinking
                 chunk = event.get("content", "")
                 assistant_content += chunk
+                print(f"[AGENT] Thought: {chunk[:100]}...")
                 await self.websocket.send_json({
                     "type": "thought",
                     "content": chunk,
@@ -266,6 +321,8 @@ class ChatWebSocketHandler:
                 # Agent is using a tool
                 tool_name = event.get("tool")
                 tool_args = event.get("args", {})
+                print(f"[AGENT] Action: {tool_name}")
+                print(f"  Args: {tool_args}")
                 await self.websocket.send_json({
                     "type": "action",
                     "tool": tool_name,
@@ -286,6 +343,7 @@ class ChatWebSocketHandler:
                 # Tool execution result
                 observation = event.get("content", "")
                 success = event.get("success", True)
+                print(f"[AGENT] Observation (success={success}): {observation[:100]}...")
                 await self.websocket.send_json({
                     "type": "observation",
                     "content": observation,
@@ -305,6 +363,7 @@ class ChatWebSocketHandler:
                 # Agent has completed the task
                 answer = event.get("content", "")
                 assistant_content += answer
+                print(f"[AGENT] Final Answer: {answer[:100]}...")
                 await self.websocket.send_json({
                     "type": "chunk",
                     "content": answer
@@ -312,43 +371,61 @@ class ChatWebSocketHandler:
 
             elif event_type == "error":
                 # Error occurred
-                error = event.get("content", "Unknown error")
+                error_message = event.get("content", "Unknown error")
+                has_error = True
+                print(f"[AGENT] ERROR: {error_message}")
                 await self.websocket.send_json({
                     "type": "error",
-                    "content": error
+                    "content": error_message
                 })
+                # Break out of the loop - don't save message for errors
+                break
 
-        # Save assistant message with agent actions
-        assistant_message = Message(
-            chat_session_id=session_id,
-            role=MessageRole.ASSISTANT,
-            content=assistant_content if assistant_content else "Task completed.",
-            message_metadata={
-                "agent_mode": True,
-                "tools_used": [a["action_type"] for a in agent_actions]
-            },
-        )
-        self.db.add(assistant_message)
-        await self.db.flush()  # Get the message ID
+        print(f"[AGENT] Agent execution completed. Total events: {event_count}")
+        print(f"[AGENT] Assistant content length: {len(assistant_content)}")
+        print(f"[AGENT] Total actions: {len(agent_actions)}")
+        print(f"[AGENT] Has error: {has_error}")
 
-        # Save all agent actions linked to the message
-        for action_data in agent_actions:
-            action = AgentAction(
-                message_id=assistant_message.id,
-                action_type=action_data["action_type"],
-                action_input=action_data["action_input"],
-                action_output=action_data.get("action_output"),
-                status=action_data.get("status", "pending")
+        # Only save assistant message if there was no error
+        if not has_error:
+            # Save assistant message with agent actions
+            assistant_message = Message(
+                chat_session_id=session_id,
+                role=MessageRole.ASSISTANT,
+                content=assistant_content if assistant_content else "Task completed.",
+                message_metadata={
+                    "agent_mode": True,
+                    "tools_used": [a["action_type"] for a in agent_actions]
+                },
             )
-            self.db.add(action)
+            self.db.add(assistant_message)
+            await self.db.flush()  # Get the message ID
 
-        await self.db.commit()
+            # Save all agent actions linked to the message
+            for action_data in agent_actions:
+                action = AgentAction(
+                    message_id=assistant_message.id,
+                    action_type=action_data["action_type"],
+                    action_input=action_data["action_input"],
+                    action_output=action_data.get("action_output"),
+                    status=action_data.get("status", "pending")
+                )
+                self.db.add(action)
 
-        # Send completion
-        await self.websocket.send_json({
-            "type": "end",
-            "message_id": assistant_message.id
-        })
+            await self.db.commit()
+
+            # Send completion with message ID
+            await self.websocket.send_json({
+                "type": "end",
+                "message_id": assistant_message.id
+            })
+        else:
+            # Send completion without message ID (error case)
+            print(f"[AGENT] Skipping message save due to error")
+            await self.websocket.send_json({
+                "type": "end",
+                "error": True
+            })
 
     async def _get_conversation_history(self, session_id: str) -> list[Dict[str, str]]:
         """Get conversation history for a session."""

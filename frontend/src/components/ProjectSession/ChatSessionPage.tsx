@@ -12,6 +12,7 @@ export default function ChatSessionPage() {
   const [input, setInput] = useState('');
   const [isSending, setIsSending] = useState(false);
   const [messages, setMessages] = useState<any[]>([]);
+  const [error, setError] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const wsRef = useRef<WebSocket | null>(null);
 
@@ -134,6 +135,7 @@ export default function ChatSessionPage() {
         }, 500);
       } else if (data.type === 'error') {
         console.error('WebSocket error:', data.content);
+        setError(data.content || 'An error occurred');
         setIsSending(false);
       }
     };
@@ -157,6 +159,7 @@ export default function ChatSessionPage() {
     const textToSend = messageText || input;
     if (!textToSend.trim() || isSending || !wsRef.current) return;
 
+    setError(null); // Clear any previous errors
     setIsSending(true);
     setInput('');
 
@@ -277,6 +280,23 @@ export default function ChatSessionPage() {
           <div ref={messagesEndRef} />
         </div>
       </div>
+
+      {/* Error Banner */}
+      {error && (
+        <div className="chat-error-banner">
+          <div className="error-content">
+            <span className="error-icon">⚠️</span>
+            <div className="error-message">{error}</div>
+            <button
+              className="error-close-btn"
+              onClick={() => setError(null)}
+              aria-label="Close error"
+            >
+              ×
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Input */}
       <div className="chat-input-container">

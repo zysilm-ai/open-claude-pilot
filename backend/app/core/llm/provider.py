@@ -113,15 +113,25 @@ class LLMProvider:
         Yields:
             Text chunks as they arrive, or function call dicts
         """
+        print(f"\n[LLM PROVIDER] generate_stream() called")
+        print(f"  Provider: {self.provider}")
+        print(f"  Model: {self.model}")
+        print(f"  Has API key: {self.api_key is not None}")
+        print(f"  Tools count: {len(tools) if tools else 0}")
+        print(f"  Messages count: {len(messages)}")
+
         params = {**self.config, **kwargs}
         model_name = self._build_model_name()
+        print(f"  Full model name: {model_name}")
 
         # Add tools to params if provided
         if tools:
             params['tools'] = tools
             params['tool_choice'] = 'auto'
+            print(f"  Tool choice: auto")
 
         try:
+            print(f"[LLM PROVIDER] Calling acompletion...")
             response = await acompletion(
                 model=model_name,
                 messages=messages,
@@ -129,17 +139,23 @@ class LLMProvider:
                 **params
             )
 
+            print(f"[LLM PROVIDER] Stream started, processing chunks...")
+            chunk_num = 0
             async for chunk in response:
+                chunk_num += 1
                 # Extract content from the chunk
                 if hasattr(chunk, 'choices') and len(chunk.choices) > 0:
                     delta = chunk.choices[0].delta
 
                     # Handle text content
                     if hasattr(delta, 'content') and delta.content:
+                        if chunk_num <= 3:
+                            print(f"[LLM PROVIDER] Text chunk #{chunk_num}: {delta.content[:30]}...")
                         yield delta.content
 
                     # Handle function calls
                     if hasattr(delta, 'tool_calls') and delta.tool_calls:
+                        print(f"[LLM PROVIDER] Tool call chunk: {delta.tool_calls}")
                         for tool_call in delta.tool_calls:
                             if hasattr(tool_call, 'function'):
                                 yield {
@@ -149,7 +165,12 @@ class LLMProvider:
                                     }
                                 }
 
+            print(f"[LLM PROVIDER] Stream complete. Total chunks: {chunk_num}")
+
         except Exception as e:
+            print(f"[LLM PROVIDER] ERROR: {str(e)}")
+            import traceback
+            traceback.print_exc()
             raise Exception(f"LLM streaming failed: {str(e)}")
 
 

@@ -99,11 +99,17 @@ Available tools will be provided as function calling options. Use them to accomp
         Yields:
             Agent steps and final response
         """
+        print(f"\n[REACT AGENT] Starting run()")
+        print(f"  User message: {user_message[:100]}...")
+        print(f"  Max iterations: {self.max_iterations}")
+        print(f"  Available tools: {[t.name for t in self.tools.list_tools()]}")
+
         # Build messages
         messages = [{"role": "system", "content": self._build_system_message()}]
 
         if conversation_history:
             messages.extend(conversation_history)
+            print(f"  Conversation history: {len(conversation_history)} messages")
 
         messages.append({"role": "user", "content": user_message})
 
@@ -111,10 +117,12 @@ Available tools will be provided as function calling options. Use them to accomp
         steps: List[AgentStep] = []
 
         for iteration in range(self.max_iterations):
+            print(f"\n[REACT AGENT] Iteration {iteration + 1}/{self.max_iterations}")
             try:
                 # Get LLM response with function calling
                 llm_messages = messages.copy()
                 tools_for_llm = self.tools.get_tools_for_llm()
+                print(f"[REACT AGENT] Tools for LLM: {len(tools_for_llm) if tools_for_llm else 0}")
 
                 # Stream response from LLM
                 full_response = ""
@@ -122,13 +130,18 @@ Available tools will be provided as function calling options. Use them to accomp
                 function_name = None
                 function_args = ""
 
+                print(f"[REACT AGENT] Calling LLM generate_stream...")
+                chunk_count = 0
                 async for chunk in self.llm.generate_stream(
                     messages=llm_messages,
                     tools=tools_for_llm if tools_for_llm else None,
                 ):
+                    chunk_count += 1
                     # Handle regular content
                     if isinstance(chunk, str):
                         full_response += chunk
+                        if chunk_count <= 3:  # Only print first few chunks
+                            print(f"[REACT AGENT] Text chunk #{chunk_count}: {chunk[:50]}...")
                         yield {
                             "type": "thought",
                             "content": chunk,
@@ -136,12 +149,18 @@ Available tools will be provided as function calling options. Use them to accomp
                         }
                     # Handle function call (if LLM returns structured data)
                     elif isinstance(chunk, dict) and "function_call" in chunk:
+                        print(f"[REACT AGENT] Function call chunk: {chunk}")
                         function_call = chunk["function_call"]
                         function_name = function_call.get("name")
                         function_args = function_call.get("arguments", "{}")
 
+                print(f"[REACT AGENT] Stream complete. Total chunks: {chunk_count}")
+                print(f"[REACT AGENT] Full response length: {len(full_response)}")
+                print(f"[REACT AGENT] Function name: {function_name}")
+
                 # Check if LLM wants to call a function
                 if function_name and self.tools.has_tool(function_name):
+                    print(f"[REACT AGENT] Executing function: {function_name}")
                     # Parse function arguments
                     try:
                         args = json.loads(function_args) if isinstance(function_args, str) else function_args
@@ -197,6 +216,8 @@ Available tools will be provided as function calling options. Use them to accomp
 
                 # No function call - agent is providing final answer
                 if full_response:
+                    print(f"[REACT AGENT] No function call - providing final answer")
+                    print(f"[REACT AGENT] Final answer: {full_response[:100]}...")
                     yield {
                         "type": "final_answer",
                         "content": full_response,
@@ -206,6 +227,7 @@ Available tools will be provided as function calling options. Use them to accomp
                     return
 
                 # If we get here with no response, something went wrong
+                print(f"[REACT AGENT] ERROR: No response from LLM")
                 yield {
                     "type": "error",
                     "content": "Agent did not provide a response",
@@ -214,6 +236,9 @@ Available tools will be provided as function calling options. Use them to accomp
                 return
 
             except Exception as e:
+                print(f"[REACT AGENT] EXCEPTION: {str(e)}")
+                import traceback
+                traceback.print_exc()
                 yield {
                     "type": "error",
                     "content": f"Agent error: {str(e)}",

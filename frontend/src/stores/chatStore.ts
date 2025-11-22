@@ -15,12 +15,15 @@ interface ChatState {
   streamingMessage: string;
   isStreaming: boolean;
   agentActions: AgentAction[];
+  error: string | null;
   setActiveSession: (sessionId: string | null) => void;
   appendStreamingMessage: (chunk: string) => void;
   setStreaming: (isStreaming: boolean) => void;
   clearStreamingMessage: () => void;
   addAgentAction: (action: AgentAction) => void;
   clearAgentActions: () => void;
+  setError: (error: string | null) => void;
+  clearError: () => void;
 }
 
 export const useChatStore = create<ChatState>((set) => ({
@@ -28,6 +31,7 @@ export const useChatStore = create<ChatState>((set) => ({
   streamingMessage: '',
   isStreaming: false,
   agentActions: [],
+  error: null,
 
   setActiveSession: (sessionId) => set({ activeSessionId: sessionId }),
 
@@ -42,4 +46,8 @@ export const useChatStore = create<ChatState>((set) => ({
     set((state) => ({ agentActions: [...state.agentActions, action] })),
 
   clearAgentActions: () => set({ agentActions: [] }),
+
+  setError: (error) => set({ error }),
+
+  clearError: () => set({ error: null }),
 }));
