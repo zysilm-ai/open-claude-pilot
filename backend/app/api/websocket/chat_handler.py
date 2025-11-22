@@ -2,7 +2,7 @@
 
 import json
 import asyncio
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 from fastapi import WebSocket, WebSocketDisconnect
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -61,25 +61,32 @@ class ChatWebSocketHandler:
                 # Receive message from client
                 data = await self.websocket.receive_text()
                 message_data = json.loads(data)
+                print(f"[CHAT HANDLER] Received message type: {message_data.get('type')}")
 
                 if message_data.get("type") == "message":
-                    await self._handle_user_message(
-                        session_id,
-                        message_data.get("content", ""),
-                        agent_config
+                    # Run message handling in background so we can receive cancel messages
+                    self.current_agent_task = asyncio.create_task(
+                        self._handle_user_message(
+                            session_id,
+                            message_data.get("content", ""),
+                            agent_config
+                        )
                     )
                 elif message_data.get("type") == "cancel":
                     # User wants to cancel the current agent execution
-                    print(f"[CHAT HANDLER] Cancel request received")
+                    print(f"[CHAT HANDLER] ⚠️ CANCEL REQUEST RECEIVED!")
+                    print(f"[CHAT HANDLER] cancel_event exists: {self.cancel_event is not None}")
+                    print(f"[CHAT HANDLER] current_agent_task exists: {self.current_agent_task is not None}")
                     if self.cancel_event:
                         self.cancel_event.set()
-                        print(f"[CHAT HANDLER] Cancel event set")
+                        print(f"[CHAT HANDLER] ✓ Cancel event SET")
                     if self.current_agent_task:
                         self.current_agent_task.cancel()
-                        print(f"[CHAT HANDLER] Agent task cancelled")
+                        print(f"[CHAT HANDLER] ✓ Agent task CANCELLED")
                     await self.websocket.send_json({
                         "type": "cancel_acknowledged"
                     })
+                    print(f"[CHAT HANDLER] Sent cancel_acknowledged to client")
 
         except WebSocketDisconnect:
             print(f"WebSocket disconnected for session {session_id}")

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { chatSessionsAPI, messagesAPI } from '@/services/api';
@@ -156,9 +156,11 @@ export default function ChatSessionPage() {
     };
 
     return () => {
+      console.log('[ChatSessionPage] Cleaning up WebSocket');
       ws.close();
     };
-  }, [sessionId, addAgentAction, clearAgentActions]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessionId]); // Only sessionId - store functions are stable
 
   const handleSend = async (messageText?: string) => {
     const textToSend = messageText || input;
