@@ -218,6 +218,9 @@
   font-size: 13px;
   overflow-x: auto;
   color: #78350f;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
 }
 
 /* Observation */
@@ -265,6 +268,9 @@
   max-height: 300px;
   overflow-y: auto;
   text-align: left;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
 }
 
 .observation.error .observation-content {
@@ -412,21 +418,24 @@ pre {
   border-radius: 3px;
   font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
   font-size: 13px;
+  color: #1f2937;
 }
 
 .message-body pre {
-  background: #1e1e1e;
-  color: #d4d4d4;
+  background: #f9fafb;
+  color: #1f2937;
   padding: 12px;
   border-radius: 6px;
   overflow-x: auto;
   margin: 12px 0;
+  border: 1px solid #e5e7eb;
 }
 
 .message-body pre code {
   background: transparent;
   padding: 0;
   color: inherit;
+  font-size: 13px;
 }
 
 .message-body ul,

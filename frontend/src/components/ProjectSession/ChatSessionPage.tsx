@@ -3,9 +3,220 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
+import { oneLight } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import { chatSessionsAPI, messagesAPI } from '@/services/api';
 import { useChatStore } from '@/stores/chatStore';
 import './ChatSessionPage.css';
+
+// Custom code component with syntax highlighting
+const CodeBlock = ({ inline, className, children, ...props }: any) => {
+  const match = /language-(\w+)/.exec(className || '');
+  const language = match ? match[1] : '';
+
+  return !inline && language ? (
+    <SyntaxHighlighter
+      style={oneLight}
+      language={language}
+      PreTag="div"
+      customStyle={{
+        margin: '12px 0',
+        borderRadius: '6px',
+        border: '1px solid #e5e7eb',
+        fontSize: '13px',
+      }}
+      {...props}
+    >
+      {String(children).replace(/\n$/, '')}
+    </SyntaxHighlighter>
+  ) : (
+    <code className={className} {...props}>
+      {children}
+    </code>
+  );
+};
+
+// Helper function to format observation content
+const formatObservationContent = (content: string | any): string => {
+  let dataToFormat = content;
+
+  // If content is already an object, use it directly
+  if (typeof content === 'object' && content !== null) {
+    dataToFormat = content;
+  } else if (typeof content === 'string') {
+    // Try to parse as JSON
+    try {
+      dataToFormat = JSON.parse(content);
+    } catch {
+      // If not JSON, just use the string as-is
+      // Replace escaped newlines with actual newlines
+      return content.replace(/\\n/g, '\n');
+    }
+  }
+
+  // If we have a parsed object, extract the result/output field
+  if (typeof dataToFormat === 'object' && dataToFormat !== null) {
+    // Try common result field names
+    const resultValue = dataToFormat.result || dataToFormat.output || dataToFormat.data || dataToFormat;
+
+    // If the result is a string, format it
+    if (typeof resultValue === 'string') {
+      return resultValue.replace(/\\n/g, '\n');
+    }
+
+    // If it's still an object, stringify it nicely
+    return JSON.stringify(resultValue, null, 2);
+  }
+
+  return String(dataToFormat);
+};
+
+// Helper function to pretty print action arguments
+const formatActionArgs = (args: string | any): string => {
+  // If args is already an object, stringify it
+  if (typeof args === 'object' && args !== null) {
+    return JSON.stringify(args, null, 2);
+  }
+
+  // If args is a string, try to parse and re-stringify
+  if (typeof args === 'string') {
+    try {
+      const parsed = JSON.parse(args);
+      return JSON.stringify(parsed, null, 2);
+    } catch {
+      // If not valid JSON, return as-is
+      return args;
+    }
+  }
+
+  return String(args);
+};
+
+// Helper to get file extension from path
+const getFileExtension = (filePath: string): string => {
+  const match = filePath.match(/\.([^.]+)$/);
+  return match ? match[1].toLowerCase() : '';
+};
+
+// Helper to get language from file extension for syntax highlighting
+const getLanguageFromExtension = (ext: string): string => {
+  const langMap: { [key: string]: string } = {
+    'js': 'javascript',
+    'jsx': 'javascript',
+    'ts': 'typescript',
+    'tsx': 'typescript',
+    'py': 'python',
+    'rb': 'ruby',
+    'java': 'java',
+    'cpp': 'cpp',
+    'c': 'c',
+    'cs': 'csharp',
+    'go': 'go',
+    'rs': 'rust',
+    'php': 'php',
+    'swift': 'swift',
+    'kt': 'kotlin',
+    'scala': 'scala',
+    'sh': 'bash',
+    'bash': 'bash',
+    'zsh': 'bash',
+    'yml': 'yaml',
+    'yaml': 'yaml',
+    'json': 'json',
+    'xml': 'xml',
+    'html': 'html',
+    'css': 'css',
+    'scss': 'scss',
+    'sass': 'sass',
+    'sql': 'sql',
+    'md': 'markdown',
+    'markdown': 'markdown',
+  };
+  return langMap[ext] || ext;
+};
+
+// Component to render file write action arguments
+const FileWriteActionArgs = ({ args }: { args: any }) => {
+  let parsedArgs = args;
+
+  // Parse if string
+  if (typeof args === 'string') {
+    try {
+      parsedArgs = JSON.parse(args);
+    } catch {
+      return <pre className="action-args">{args}</pre>;
+    }
+  }
+
+  // Extract file_path and content
+  const filePath = parsedArgs.file_path || parsedArgs.path || parsedArgs.filename;
+  const content = parsedArgs.content || parsedArgs.data;
+
+  if (!filePath || !content) {
+    return <pre className="action-args">{JSON.stringify(parsedArgs, null, 2)}</pre>;
+  }
+
+  const ext = getFileExtension(filePath);
+
+  // Check if it's an image
+  if (['jpg', 'jpeg', 'png', 'gif', 'svg', 'webp', 'bmp'].includes(ext)) {
+    return (
+      <div className="action-args">
+        <div style={{ marginBottom: '8px', fontWeight: 600 }}>
+          Writing image: {filePath}
+        </div>
+        <div style={{ color: '#6b7280', fontSize: '12px' }}>
+          (Image preview not available for base64 content)
+        </div>
+      </div>
+    );
+  }
+
+  // Check if it's markdown
+  if (['md', 'markdown'].includes(ext)) {
+    return (
+      <div className="action-args">
+        <div style={{ marginBottom: '8px', fontWeight: 600 }}>
+          Writing markdown: {filePath}
+        </div>
+        <div style={{
+          background: '#f9fafb',
+          border: '1px solid #e5e7eb',
+          borderRadius: '6px',
+          padding: '12px',
+          marginTop: '8px'
+        }}>
+          <ReactMarkdown remarkPlugins={[remarkGfm]} components={{ code: CodeBlock }}>
+            {content}
+          </ReactMarkdown>
+        </div>
+      </div>
+    );
+  }
+
+  // For code files, show with syntax highlighting
+  const language = getLanguageFromExtension(ext);
+
+  return (
+    <div className="action-args">
+      <div style={{ marginBottom: '8px', fontWeight: 600 }}>
+        Writing file: {filePath}
+      </div>
+      <SyntaxHighlighter
+        language={language}
+        style={oneLight}
+        customStyle={{
+          margin: '8px 0 0 0',
+          borderRadius: '6px',
+          border: '1px solid #e5e7eb',
+          fontSize: '13px',
+        }}
+      >
+        {content}
+      </SyntaxHighlighter>
+    </div>
+  );
+};
 
 export default function ChatSessionPage() {
   const { projectId, sessionId } = useParams<{ projectId: string; sessionId: string }>();
@@ -297,11 +508,18 @@ export default function ChatSessionPage() {
               <span className="action-icon">📝</span>
               <strong>{event.tool}</strong>
             </div>
-            <pre className="action-args partial">{event.partial_args || event.content}</pre>
+            <pre className="action-args partial">{formatActionArgs(event.partial_args || event.content)}</pre>
           </div>
         );
 
       case 'action':
+        // Check if this is a file write action
+        const isFileWrite = event.tool && (
+          event.tool.toLowerCase().includes('file_write') ||
+          event.tool.toLowerCase().includes('write_file') ||
+          event.tool.toLowerCase().includes('writefile')
+        );
+
         return (
           <div key={index} className="action-usage">
             <div className="action-header">
@@ -309,7 +527,11 @@ export default function ChatSessionPage() {
               <strong>Using {event.tool}</strong>
             </div>
             {event.args && (
-              <pre className="action-args">{JSON.stringify(event.args, null, 2)}</pre>
+              isFileWrite ? (
+                <FileWriteActionArgs args={event.args} />
+              ) : (
+                <pre className="action-args">{formatActionArgs(event.args)}</pre>
+              )
             )}
           </div>
         );
@@ -323,7 +545,7 @@ export default function ChatSessionPage() {
               </span>
               <strong>Result</strong>
             </div>
-            <pre className="observation-content">{event.content}</pre>
+            <pre className="observation-content">{formatObservationContent(event.content)}</pre>
           </div>
         );
 
@@ -383,30 +605,43 @@ export default function ChatSessionPage() {
 
                       return hasPersistedActions ? (
                         <div className="agent-actions-inline">
-                          {message.agent_actions.map((action: any, idx: number) => (
-                            <div key={idx} className="action-block action-action">
-                              <div className="action-usage">
-                                <div className="action-header">
-                                  <span className="action-icon">🔧</span>
-                                  <strong>Used {action.action_type}</strong>
-                                </div>
-                                {action.action_input && (
-                                  <pre className="action-args">{JSON.stringify(action.action_input, null, 2)}</pre>
-                                )}
-                                {action.action_output && (
-                                  <div className={`observation ${action.status === 'success' ? 'success' : 'error'}`}>
-                                    <div className="observation-header">
-                                      <span className="observation-icon">
-                                        {action.status === 'success' ? '✅' : '❌'}
-                                      </span>
-                                      <strong>Result</strong>
-                                    </div>
-                                    <pre className="observation-content">{JSON.stringify(action.action_output, null, 2)}</pre>
+                          {message.agent_actions.map((action: any, idx: number) => {
+                            // Check if this is a file write action
+                            const isFileWrite = action.action_type && (
+                              action.action_type.toLowerCase().includes('file_write') ||
+                              action.action_type.toLowerCase().includes('write_file') ||
+                              action.action_type.toLowerCase().includes('writefile')
+                            );
+
+                            return (
+                              <div key={idx} className="action-block action-action">
+                                <div className="action-usage">
+                                  <div className="action-header">
+                                    <span className="action-icon">🔧</span>
+                                    <strong>Used {action.action_type}</strong>
                                   </div>
-                                )}
+                                  {action.action_input && (
+                                    isFileWrite ? (
+                                      <FileWriteActionArgs args={action.action_input} />
+                                    ) : (
+                                      <pre className="action-args">{formatActionArgs(action.action_input)}</pre>
+                                    )
+                                  )}
+                                  {action.action_output && (
+                                    <div className={`observation ${action.status === 'success' ? 'success' : 'error'}`}>
+                                      <div className="observation-header">
+                                        <span className="observation-icon">
+                                          {action.status === 'success' ? '✅' : '❌'}
+                                        </span>
+                                        <strong>Result</strong>
+                                      </div>
+                                      <pre className="observation-content">{formatObservationContent(action.action_output)}</pre>
+                                    </div>
+                                  )}
+                                </div>
                               </div>
-                            </div>
-                          ))}
+                            );
+                          })}
                         </div>
                       ) : null;
                     })()}
@@ -455,7 +690,11 @@ export default function ChatSessionPage() {
                               // Non-chunk event: flush accumulated chunks as markdown first
                               if (accumulatedChunks) {
                                 renderedElements.push(
-                                  <ReactMarkdown key={`chunk-${chunkStartIndex}`} remarkPlugins={[remarkGfm]}>
+                                  <ReactMarkdown
+                                    key={`chunk-${chunkStartIndex}`}
+                                    remarkPlugins={[remarkGfm]}
+                                    components={{ code: CodeBlock }}
+                                  >
                                     {accumulatedChunks}
                                   </ReactMarkdown>
                                 );
@@ -469,7 +708,11 @@ export default function ChatSessionPage() {
                           // Flush any remaining chunks
                           if (accumulatedChunks) {
                             renderedElements.push(
-                              <ReactMarkdown key={`chunk-${chunkStartIndex}`} remarkPlugins={[remarkGfm]}>
+                              <ReactMarkdown
+                                key={`chunk-${chunkStartIndex}`}
+                                remarkPlugins={[remarkGfm]}
+                                components={{ code: CodeBlock }}
+                              >
                                 {accumulatedChunks}
                               </ReactMarkdown>
                             );
@@ -484,7 +727,7 @@ export default function ChatSessionPage() {
                     {/* Message content for completed messages */}
                     {message.role === 'assistant' && index < messages.length - 1 && message.content && (
                       <div className="message-body">
-                        <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                        <ReactMarkdown remarkPlugins={[remarkGfm]} components={{ code: CodeBlock }}>
                           {message.content}
                         </ReactMarkdown>
                       </div>
@@ -493,7 +736,7 @@ export default function ChatSessionPage() {
                     {/* User messages always show content */}
                     {message.role === 'user' && message.content && (
                       <div className="message-body">
-                        <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                        <ReactMarkdown remarkPlugins={[remarkGfm]} components={{ code: CodeBlock }}>
                           {message.content}
                         </ReactMarkdown>
                       </div>
