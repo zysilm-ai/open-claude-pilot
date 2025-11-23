@@ -100,10 +100,9 @@ class FileReadTool(Tool):
 
         Args:
             container: SandboxContainer instance for file operations
-            model_name: Name of the LLM model (reserved for future VLM support)
+            model_name: Name of the LLM model (not used in tool, only for context)
         """
         self._container = container
-        self._model_name = model_name.lower()
 
     @property
     def name(self) -> str:

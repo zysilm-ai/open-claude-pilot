@@ -15,6 +15,82 @@ from app.core.sandbox.manager import get_container_manager
 from app.api.websocket.task_registry import get_agent_task_registry
 
 
+def is_vision_model(model_name: str) -> bool:
+    """
+    Check if a model supports vision/image inputs.
+
+    Args:
+        model_name: The LLM model name
+
+    Returns:
+        True if the model supports vision, False otherwise
+    """
+    model_lower = model_name.lower()
+
+    # OpenAI vision models
+    if any(name in model_lower for name in ['gpt-4o', 'gpt-4-turbo', 'gpt-4-vision']):
+        return True
+
+    # Anthropic Claude 3+ models (all support vision)
+    if any(name in model_lower for name in ['claude-3', 'claude-sonnet', 'claude-opus', 'claude-haiku']):
+        return True
+
+    # Google Gemini vision models
+    if 'gemini' in model_lower and ('vision' in model_lower or 'pro' in model_lower):
+        return True
+
+    return False
+
+
+def build_tool_result_content(
+    action: AgentAction,
+    model_name: str
+) -> str:
+    """
+    Build tool result content for conversation history.
+    For vision models with image results, returns short text (image data in metadata).
+    For non-vision models, returns descriptive text only.
+
+    Args:
+        action: The agent action containing tool result
+        model_name: The LLM model name
+
+    Returns:
+        Formatted tool result content string
+    """
+    # Check if this is an image result
+    has_image = (
+        action.action_metadata and
+        action.action_metadata.get('type') == 'image' and
+        action.action_metadata.get('image_data')
+    )
+
+    # Format the base output content
+    if action.action_output:
+        if isinstance(action.action_output, dict):
+            success = action.action_output.get("success", True)
+            result = action.action_output.get("result", action.action_output)
+            status_prefix = "[SUCCESS]" if success else "[FAILED]"
+
+            # For images with VLM models, keep the short message
+            # For images with non-VLM models, add explanation
+            if has_image and not is_vision_model(model_name):
+                # Non-VLM model: Add explanation that it can't read images
+                result = (
+                    f"{result}\n\n"
+                    "Note: This is an image file. Image content cannot be analyzed by this model. "
+                    "The image will be displayed to the user in the chat interface."
+                )
+
+            output_content = f"{status_prefix} Tool '{action.action_type}' result:\n{result}"
+        else:
+            output_content = f"Tool '{action.action_type}' returned: {action.action_output}"
+    else:
+        output_content = f"Tool '{action.action_type}' completed (no output)"
+
+    return output_content
+
+
 class ChatWebSocketHandler:
     """Handle WebSocket connections for chat streaming."""
 
@@ -135,8 +211,8 @@ class ChatWebSocketHandler:
             "message_id": user_message.id
         })
 
-        # Get conversation history
-        history = await self._get_conversation_history(session_id)
+        # Get conversation history (pass model name for vision support)
+        history = await self._get_conversation_history(session_id, agent_config.llm_model)
         print(f"[CHAT HANDLER] Conversation history length: {len(history)}")
 
         # Debug: Log the full conversation history to verify tool outputs are included
@@ -699,8 +775,22 @@ class ChatWebSocketHandler:
         except:
             print(f"[AGENT] WebSocket disconnected, cannot send end message")
 
-    async def _get_conversation_history(self, session_id: str) -> list[Dict[str, str]]:
-        """Get conversation history for a session, including agent actions."""
+    async def _get_conversation_history(
+        self,
+        session_id: str,
+        model_name: str
+    ) -> list[Dict[str, str | Any]]:
+        """
+        Get conversation history for a session, including agent actions.
+        For vision models, formats image results using vision API format.
+
+        Args:
+            session_id: The chat session ID
+            model_name: The LLM model name (for vision support detection)
+
+        Returns:
+            List of message dicts formatted for the LLM API
+        """
         from sqlalchemy.orm import joinedload
 
         query = (
@@ -712,7 +802,9 @@ class ChatWebSocketHandler:
         result = await self.db.execute(query)
         messages = result.unique().scalars().all()
 
+        is_vlm = is_vision_model(model_name)
         history = []
+
         for msg in messages:
             # Add the main message
             history.append({
@@ -737,23 +829,40 @@ class ChatWebSocketHandler:
                         }
                     })
 
-                    # Add function result
-                    # Tool results are sent as user messages in GPT-5 format
-                    # Format the output to clearly show success status and result
-                    if action.action_output:
-                        if isinstance(action.action_output, dict):
-                            success = action.action_output.get("success", True)
-                            result = action.action_output.get("result", action.action_output)
-                            status_prefix = "[SUCCESS]" if success else "[FAILED]"
-                            output_content = f"{status_prefix} Tool '{action.action_type}' result:\n{result}"
-                        else:
-                            output_content = f"Tool '{action.action_type}' returned: {action.action_output}"
-                    else:
-                        output_content = f"Tool '{action.action_type}' completed (no output)"
+                    # Add function result with vision support
+                    # Check if this is an image result for a VLM
+                    has_image = (
+                        action.action_metadata and
+                        action.action_metadata.get('type') == 'image' and
+                        action.action_metadata.get('image_data')
+                    )
 
-                    history.append({
-                        "role": "user",
-                        "content": output_content
-                    })
+                    if has_image and is_vlm:
+                        # Vision model: Use multi-content format with image
+                        image_data = action.action_metadata['image_data']
+                        text_content = build_tool_result_content(action, model_name)
+
+                        history.append({
+                            "role": "user",
+                            "content": [
+                                {
+                                    "type": "text",
+                                    "text": text_content
+                                },
+                                {
+                                    "type": "image_url",
+                                    "image_url": {
+                                        "url": image_data  # data URI format: data:image/png;base64,...
+                                    }
+                                }
+                            ]
+                        })
+                    else:
+                        # Non-vision model or text-only result: Use text format
+                        output_content = build_tool_result_content(action, model_name)
+                        history.append({
+                            "role": "user",
+                            "content": output_content
+                        })
 
         return history
