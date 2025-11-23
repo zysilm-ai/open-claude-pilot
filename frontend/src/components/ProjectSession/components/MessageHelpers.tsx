@@ -98,6 +98,55 @@ export const CodeBlock = ({ inline, className, children, ...props }: any) => {
   );
 };
 
+// Component to render observation content (handles images)
+export const ObservationContent = ({ content, metadata }: { content: string; metadata?: any }) => {
+  // Check if this observation contains an image
+  if (metadata && metadata.type === 'image' && metadata.image_data) {
+    const imageData = metadata.image_data;
+    const filename = metadata.filename || 'image';
+
+    return (
+      <div className="observation-content" style={{ textAlign: 'left' }}>
+        <div style={{ marginBottom: '12px', color: '#14532d' }}>
+          {content}
+        </div>
+        <div style={{
+          background: '#ffffff',
+          border: '1px solid #86efac',
+          borderRadius: '6px',
+          padding: '12px',
+          textAlign: 'center'
+        }}>
+          <img
+            src={imageData}
+            alt={filename}
+            style={{
+              maxWidth: '100%',
+              maxHeight: '400px',
+              borderRadius: '4px',
+              boxShadow: '0 1px 3px rgba(0,0,0,0.1)'
+            }}
+          />
+          <div style={{
+            marginTop: '8px',
+            fontSize: '12px',
+            color: '#6b7280'
+          }}>
+            {filename}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Regular text observation
+  return (
+    <pre className="observation-content">
+      {formatObservationContent(content)}
+    </pre>
+  );
+};
+
 export const FileWriteActionArgs = ({ args }: { args: any }) => {
   let parsedArgs = args;
 

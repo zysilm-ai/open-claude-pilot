@@ -372,7 +372,7 @@ class ChatWebSocketHandler:
             if "bash" in agent_config.enabled_tools:
                 tool_registry.register(BashTool(container))
             if "file_read" in agent_config.enabled_tools:
-                tool_registry.register(FileReadTool(container))
+                tool_registry.register(FileReadTool(container, agent_config.llm_model))
             if "file_write" in agent_config.enabled_tools:
                 tool_registry.register(FileWriteTool(container))
             if "file_edit" in agent_config.enabled_tools:
@@ -530,6 +530,7 @@ class ChatWebSocketHandler:
                     # Tool execution result - update the action in database
                     observation = event.get("content", "")
                     success = event.get("success", True)
+                    metadata = event.get("metadata", {})
                     print(f"[AGENT] Observation (success={success}): {observation[:100]}...")
 
                     try:
@@ -537,6 +538,7 @@ class ChatWebSocketHandler:
                             "type": "observation",
                             "content": observation,
                             "success": success,
+                            "metadata": metadata,
                             "step": event.get("step", 0)
                         })
                     except:
@@ -544,10 +546,8 @@ class ChatWebSocketHandler:
 
                     # INCREMENTAL SAVE: Update the current action with result
                     if current_action:
-                        current_action.action_output = {
-                            "result": observation,
-                            "success": success
-                        }
+                        current_action.action_output = observation
+                        current_action.metadata = metadata
                         current_action.status = "success" if success else "error"
                         await self.db.commit()
                         chunks_since_commit = 0  # Reset counter after action commit
@@ -577,7 +577,7 @@ class ChatWebSocketHandler:
                                     tool_registry.register(BashTool(container))
                                     print(f"[AGENT]   ✓ Registered BashTool")
                                 if "file_read" in agent_config.enabled_tools:
-                                    tool_registry.register(FileReadTool(container))
+                                    tool_registry.register(FileReadTool(container, agent_config.llm_model))
                                     print(f"[AGENT]   ✓ Registered FileReadTool")
                                 if "file_write" in agent_config.enabled_tools:
                                     tool_registry.register(FileWriteTool(container))

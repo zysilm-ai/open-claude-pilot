@@ -150,11 +150,14 @@ class SandboxContainer:
 
         Returns:
             File content or None if error
+            For binary files (images, etc), returns base64-encoded string with prefix "data:image/..."
         """
         try:
             import tarfile
             import io
             import asyncio
+            import base64
+            import mimetypes
 
             # Run blocking I/O in thread pool
             def _read():
@@ -172,8 +175,21 @@ class SandboxContainer:
                 if member:
                     f = tar.extractfile(member)
                     if f:
-                        content = f.read().decode('utf-8')
-                        return content
+                        raw_bytes = f.read()
+
+                        # Try to decode as UTF-8 text
+                        try:
+                            content = raw_bytes.decode('utf-8')
+                            return content
+                        except UnicodeDecodeError:
+                            # Binary file - encode as base64 with data URI
+                            # Guess MIME type from file extension
+                            mime_type, _ = mimetypes.guess_type(container_path)
+                            if mime_type is None:
+                                mime_type = 'application/octet-stream'
+
+                            b64_data = base64.b64encode(raw_bytes).decode('ascii')
+                            return f"data:{mime_type};base64,{b64_data}"
 
                 return None
 

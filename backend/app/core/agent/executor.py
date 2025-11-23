@@ -353,6 +353,7 @@ Available tools will be provided as function calling options. Use them to accomp
                                 "type": "observation",
                                 "content": observation,
                                 "success": result.success,
+                                "metadata": result.metadata,
                                 "step": iteration + 1,
                             }
 

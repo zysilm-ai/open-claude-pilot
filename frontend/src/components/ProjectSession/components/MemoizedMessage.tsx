@@ -5,7 +5,7 @@ import {
   CodeBlock,
   FileWriteActionArgs,
   formatActionArgs,
-  formatObservationContent
+  ObservationContent
 } from './MessageHelpers';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -87,7 +87,7 @@ export const MemoizedMessage = memo(
                 </span>
                 <strong>Result</strong>
               </div>
-              <pre className="observation-content">{formatObservationContent(event.content || '')}</pre>
+              <ObservationContent content={event.content || ''} metadata={event.metadata} />
             </div>
           );
 
@@ -146,7 +146,7 @@ export const MemoizedMessage = memo(
                                 </span>
                                 <strong>Result</strong>
                               </div>
-                              <pre className="observation-content">{formatObservationContent(action.action_output)}</pre>
+                              <ObservationContent content={action.action_output} metadata={action.metadata} />
                             </div>
                           )}
                         </div>

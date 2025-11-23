@@ -95,13 +95,26 @@ class FileEditInput(BaseModel):
 class FileReadTool(Tool):
     """Tool for reading files from the sandbox environment."""
 
-    def __init__(self, container: SandboxContainer):
+    def __init__(self, container: SandboxContainer, model_name: str = ""):
         """Initialize FileReadTool with a sandbox container.
 
         Args:
             container: SandboxContainer instance for file operations
+            model_name: Name of the LLM model (to detect vision capabilities)
         """
         self._container = container
+        self._model_name = model_name.lower()
+
+        # List of vision-capable models
+        self._vision_models = [
+            'gpt-4-vision', 'gpt-4o', 'gpt-4-turbo',
+            'claude-3-opus', 'claude-3-sonnet', 'claude-3-haiku',
+            'gemini-pro-vision', 'gemini-1.5'
+        ]
+
+    def _is_vision_model(self) -> bool:
+        """Check if the current model supports vision."""
+        return any(vm in self._model_name for vm in self._vision_models)
 
     @property
     def name(self) -> str:
@@ -112,11 +125,14 @@ class FileReadTool(Tool):
         return (
             "Read the complete contents of a file from the sandbox environment. "
             "Can read from: /workspace/project_files (user uploaded files) or "
-            "/workspace/out (files created by you). Use this to: inspect code before editing, "
-            "understand file structure, view configuration files, check log outputs, "
-            "or read any text-based file. Returns the entire file content as a string. "
-            "For large files, consider using bash with 'head' or 'tail' commands. "
-            "Examples: '/workspace/project_files/data.csv', '/workspace/out/script.py'."
+            "/workspace/out (files created by you). Handles BOTH text and binary files. "
+            "For text files: returns content as string. "
+            "For binary files (images, PDFs, etc): returns base64-encoded data URI (e.g., 'data:image/png;base64,...'). "
+            "Use this to: inspect code before editing, view configuration files, check log outputs, "
+            "read data files, or retrieve generated images to show to the user. "
+            "For large text files, consider using bash with 'head' or 'tail' commands. "
+            "Examples: '/workspace/out/script.py', '/workspace/out/chart.png', '/workspace/project_files/data.csv'. "
+            "IMPORTANT: After generating an image, ALWAYS read it with this tool and include the data URI in your response so the user can see it."
         )
 
     @property
@@ -142,7 +158,7 @@ class FileReadTool(Tool):
             path: Path to the file to read
 
         Returns:
-            ToolResult with file content
+            ToolResult with file content (text or base64 data URI for binary files)
         """
         try:
             # Validate file path for security
@@ -157,13 +173,62 @@ class FileReadTool(Tool):
             # Read file from container
             content = await self._container.read_file(path)
 
+            if content is None:
+                return ToolResult(
+                    success=False,
+                    output="",
+                    error=f"Failed to read file: {path}",
+                    metadata={"path": path},
+                )
+
+            # Check if it's a binary file (data URI)
+            is_binary = content.startswith('data:')
+
+            # For images, provide helpful metadata
+            metadata = {
+                "path": path,
+                "size": len(content),
+                "is_binary": is_binary,
+            }
+
+            # Add helpful message for images
+            if is_binary and 'image/' in content[:50]:
+                filename = path.split('/')[-1]
+                # Extract MIME type and calculate size
+                mime_type = content.split(';')[0].replace('data:', '')
+                data_size_kb = len(content) // 1024
+
+                # For VLMs: include image in output so the model can "see" it
+                # For non-VLMs: just include short message to save tokens
+                is_vlm = self._is_vision_model()
+
+                if is_vlm:
+                    # VLM can analyze the image
+                    output_msg = (
+                        f"Successfully read image file: {path} ({data_size_kb}KB, {mime_type})\n\n"
+                        f"Image content (you can analyze this):\n{content}\n\n"
+                        f"The image will also be displayed to the user in the chat."
+                    )
+                else:
+                    # Non-VLM: short message only
+                    output_msg = (
+                        f"Successfully read image file: {path} ({data_size_kb}KB, {mime_type})\n"
+                        f"Image will be automatically displayed to the user in the chat."
+                    )
+
+                # Store full image data in metadata for frontend to display
+                metadata["type"] = "image"
+                metadata["image_data"] = content  # Full base64 data URI
+                metadata["filename"] = filename
+                metadata["mime_type"] = mime_type
+                metadata["is_vlm"] = is_vlm
+            else:
+                output_msg = content
+
             return ToolResult(
                 success=True,
-                output=content,
-                metadata={
-                    "path": path,
-                    "size": len(content),
-                },
+                output=output_msg,
+                metadata=metadata,
             )
 
         except FileNotFoundError:
