@@ -1,9 +1,10 @@
 export interface ChatMessage {
-  type: 'message' | 'chunk' | 'start' | 'end' | 'error' | 'user_message_saved' | 'thought' | 'action' | 'action_streaming' | 'observation' | 'cancelled' | 'cancel_acknowledged';
+  type: 'message' | 'chunk' | 'start' | 'end' | 'error' | 'user_message_saved' | 'thought' | 'action' | 'action_streaming' | 'action_args_chunk' | 'observation' | 'cancelled' | 'cancel_acknowledged';
   content?: string;
   message_id?: string;
   tool?: string;
   args?: any;
+  partial_args?: string;  // For action_args_chunk events
   success?: boolean;
   step?: number;
   partial_content?: string;
@@ -47,6 +48,10 @@ export class ChatWebSocket {
     this.ws.onmessage = (event) => {
       try {
         const message: ChatMessage = JSON.parse(event.data);
+        // Log action_args_chunk messages specifically for debugging
+        if (message.type === 'action_args_chunk') {
+          console.log('[WebSocket] Received action_args_chunk:', message);
+        }
         if (this.onMessageCallback) {
           this.onMessageCallback(message);
         }

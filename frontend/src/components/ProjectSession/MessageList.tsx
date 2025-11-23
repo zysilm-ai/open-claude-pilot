@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react';
 import type { Message } from '@/types';
-import type { AgentAction } from '@/stores/chatStore';
+import type { AgentAction, StreamEvent } from '@/stores/chatStore';
 import './MessageList.css';
 
 interface MessageListProps {
@@ -8,13 +8,14 @@ interface MessageListProps {
   streamingMessage: string;
   isStreaming: boolean;
   agentActions: AgentAction[];
+  streamEvents: StreamEvent[];
 }
 
 export default function MessageList({
   messages,
   streamingMessage,
   isStreaming,
-  agentActions,
+  streamEvents,
 }: MessageListProps) {
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -24,7 +25,7 @@ export default function MessageList({
 
   useEffect(() => {
     scrollToBottom();
-  }, [messages, streamingMessage]);
+  }, [messages, streamingMessage, streamEvents]);
 
   const formatTime = (dateString: string) => {
     const date = new Date(dateString);
@@ -32,6 +33,66 @@ export default function MessageList({
       hour: '2-digit',
       minute: '2-digit',
     });
+  };
+
+  // Render a single stream event in the correct order
+  const renderStreamEvent = (event: StreamEvent, index: number) => {
+    switch (event.type) {
+      case 'chunk':
+        return event.content;
+
+      case 'action_streaming':
+        return (
+          <div key={index} className="agent-action agent-action-streaming">
+            <div className="action-tool">
+              <span className="action-icon">⏳</span>
+              <strong>{event.tool}</strong>
+              <span className="action-status">{event.status}</span>
+            </div>
+          </div>
+        );
+
+      case 'action':
+        return (
+          <div key={index} className="agent-action agent-action-action">
+            <div className="action-tool">
+              <span className="action-icon">🔧</span>
+              <strong>{event.tool}</strong>
+              {event.args && (
+                <pre className="action-args">{JSON.stringify(event.args, null, 2)}</pre>
+              )}
+            </div>
+          </div>
+        );
+
+      case 'action_args_chunk':
+        // Show partial arguments being built up in real-time
+        return (
+          <div key={index} className="agent-action agent-action-args-chunk">
+            <div className="action-tool">
+              <span className="action-icon">📝</span>
+              <strong>{event.tool}</strong>
+              <pre className="action-args partial">{event.partial_args}</pre>
+            </div>
+          </div>
+        );
+
+      case 'observation':
+        return (
+          <div key={index} className="agent-action agent-action-observation">
+            <div className={`observation ${event.success ? 'success' : 'error'}`}>
+              <span className="observation-icon">{event.success ? '✓' : '✗'}</span>
+              <pre className="observation-content">{event.content}</pre>
+            </div>
+          </div>
+        );
+
+      case 'thought':
+        return event.content;
+
+      default:
+        return null;
+    }
   };
 
   return (
@@ -62,35 +123,12 @@ export default function MessageList({
             <span className="message-time">Now</span>
           </div>
 
-          {/* Display agent actions */}
-          {agentActions.length > 0 && (
-            <div className="agent-actions">
-              {agentActions.map((action, idx) => (
-                <div key={idx} className={`agent-action agent-action-${action.type}`}>
-                  {action.type === 'action' && (
-                    <div className="action-tool">
-                      <span className="action-icon">🔧</span>
-                      <strong>{action.tool}</strong>
-                      {action.args && (
-                        <pre className="action-args">{JSON.stringify(action.args, null, 2)}</pre>
-                      )}
-                    </div>
-                  )}
-                  {action.type === 'observation' && (
-                    <div className={`observation ${action.success ? 'success' : 'error'}`}>
-                      <span className="observation-icon">{action.success ? '✓' : '✗'}</span>
-                      <pre className="observation-content">{action.content}</pre>
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
-          )}
-
-          {/* Display streaming message */}
-          {streamingMessage && (
+          {/* Display unified stream of events in order */}
+          {streamEvents.length > 0 && (
             <div className="message-content">
-              {streamingMessage}
+              {streamEvents.map((event, idx) => (
+                <span key={idx}>{renderStreamEvent(event, idx)}</span>
+              ))}
               <span className="streaming-cursor">▋</span>
             </div>
           )}

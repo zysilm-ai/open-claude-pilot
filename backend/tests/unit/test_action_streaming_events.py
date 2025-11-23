@@ -331,5 +331,162 @@ async def test_event_order_chunk_then_streaming_then_action():
     assert action_indices[0] < observation_indices[0], "action should come before observation"
 
 
+@pytest.mark.asyncio
+async def test_action_args_chunk_events_emitted():
+    """Test that action_args_chunk events are emitted for each argument chunk."""
+
+    mock_llm = MagicMock()
+
+    async def mock_generate_stream(*args, **kwargs):
+        """Simulate streaming function call with arguments arriving in chunks."""
+        # Tool name first
+        yield {"function_call": {"name": "tool_a", "arguments": ""}, "index": 0}
+        # Arguments arrive piece by piece
+        yield {"function_call": {"name": None, "arguments": '{"x"'}, "index": 0}
+        yield {"function_call": {"name": None, "arguments": ': 1'}, "index": 0}
+        yield {"function_call": {"name": None, "arguments": '}'}, "index": 0}
+
+    mock_llm.generate_stream = mock_generate_stream
+
+    tool_registry = ToolRegistry()
+    tool_registry.register(MockTool("tool_a"))
+
+    agent = ReActAgent(
+        llm_provider=mock_llm,
+        tool_registry=tool_registry,
+        max_iterations=1
+    )
+
+    events = []
+    async for event in agent.run("Test"):
+        events.append(event)
+
+    # Should have action_args_chunk events for the argument chunks
+    args_chunk_events = [e for e in events if e.get("type") == "action_args_chunk"]
+    assert len(args_chunk_events) == 3, f"Should have 3 action_args_chunk events, got {len(args_chunk_events)}"
+
+    # Verify cumulative arguments in each chunk
+    assert args_chunk_events[0]["partial_args"] == '{"x"'
+    assert args_chunk_events[1]["partial_args"] == '{"x": 1'
+    assert args_chunk_events[2]["partial_args"] == '{"x": 1}'
+
+    # Each should have the tool name
+    for chunk_event in args_chunk_events:
+        assert chunk_event["tool"] == "tool_a"
+        assert chunk_event["step"] == 1
+
+
+@pytest.mark.asyncio
+async def test_action_args_chunk_order():
+    """Test that action_args_chunk events appear in correct order."""
+
+    mock_llm = MagicMock()
+
+    async def mock_generate_stream(*args, **kwargs):
+        yield {"function_call": {"name": "my_tool", "arguments": ""}, "index": 0}
+        yield {"function_call": {"name": None, "arguments": '{"a"'}, "index": 0}
+        yield {"function_call": {"name": None, "arguments": ': 1}'}, "index": 0}
+
+    mock_llm.generate_stream = mock_generate_stream
+
+    tool_registry = ToolRegistry()
+    tool_registry.register(MockTool("my_tool"))
+
+    agent = ReActAgent(
+        llm_provider=mock_llm,
+        tool_registry=tool_registry,
+        max_iterations=1
+    )
+
+    events = []
+    async for event in agent.run("Test"):
+        events.append(event)
+
+    # Get indices of different event types
+    event_types = [e.get("type") for e in events]
+
+    streaming_idx = event_types.index("action_streaming")
+    first_chunk_idx = event_types.index("action_args_chunk")
+    action_idx = event_types.index("action")
+    observation_idx = event_types.index("observation")
+
+    # Verify order: action_streaming -> action_args_chunk -> action -> observation
+    assert streaming_idx < first_chunk_idx, "action_streaming should come before action_args_chunk"
+    assert first_chunk_idx < action_idx, "action_args_chunk should come before action"
+    assert action_idx < observation_idx, "action should come before observation"
+
+
+@pytest.mark.asyncio
+async def test_no_action_args_chunk_for_empty_arguments():
+    """Test that no action_args_chunk events are emitted if arguments are empty."""
+
+    mock_llm = MagicMock()
+
+    async def mock_generate_stream(*args, **kwargs):
+        """Simulate function call with no arguments."""
+        yield {"function_call": {"name": "tool_a", "arguments": ""}, "index": 0}
+        # No argument chunks - just empty arguments
+
+    mock_llm.generate_stream = mock_generate_stream
+
+    tool_registry = ToolRegistry()
+    tool_registry.register(MockTool("tool_a"))
+
+    agent = ReActAgent(
+        llm_provider=mock_llm,
+        tool_registry=tool_registry,
+        max_iterations=1
+    )
+
+    events = []
+    async for event in agent.run("Test"):
+        events.append(event)
+
+    # Should have NO action_args_chunk events since arguments are empty
+    args_chunk_events = [e for e in events if e.get("type") == "action_args_chunk"]
+    assert len(args_chunk_events) == 0, "Should have no action_args_chunk events for empty arguments"
+
+
+@pytest.mark.asyncio
+async def test_action_args_chunk_multiple_tools():
+    """Test that each tool gets its own action_args_chunk events."""
+
+    mock_llm = MagicMock()
+
+    async def mock_generate_stream(*args, **kwargs):
+        """Simulate multiple tool calls with arguments."""
+        # Tool A
+        yield {"function_call": {"name": "tool_a", "arguments": ""}, "index": 0}
+        yield {"function_call": {"name": None, "arguments": '{"x": 1}'}, "index": 0}
+
+        # Tool B (won't be executed but should get streaming events)
+        yield {"function_call": {"name": "tool_b", "arguments": ""}, "index": 1}
+        yield {"function_call": {"name": None, "arguments": '{"y": 2}'}, "index": 1}
+
+    mock_llm.generate_stream = mock_generate_stream
+
+    tool_registry = ToolRegistry()
+    tool_registry.register(MockTool("tool_a"))
+    tool_registry.register(MockTool("tool_b"))
+
+    agent = ReActAgent(
+        llm_provider=mock_llm,
+        tool_registry=tool_registry,
+        max_iterations=1
+    )
+
+    events = []
+    async for event in agent.run("Test"):
+        events.append(event)
+
+    # Should have action_args_chunk events for both tools
+    args_chunk_events = [e for e in events if e.get("type") == "action_args_chunk"]
+    assert len(args_chunk_events) == 2, f"Should have 2 action_args_chunk events, got {len(args_chunk_events)}"
+
+    # Verify each tool has its chunk
+    tools_with_chunks = {e["tool"] for e in args_chunk_events}
+    assert tools_with_chunks == {"tool_a", "tool_b"}, "Both tools should have arg chunk events"
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

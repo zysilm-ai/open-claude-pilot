@@ -215,6 +215,16 @@ Available tools will be provided as function calling options. Use them to accomp
                         if function_call.get("arguments"):
                             tool_calls[index]["arguments"] += function_call.get("arguments", "")
 
+                            # Emit real-time argument chunk event to show progressive build-up
+                            # Only emit if we've already announced this tool (has a name)
+                            if tool_calls[index]["name"]:
+                                yield {
+                                    "type": "action_args_chunk",
+                                    "tool": tool_calls[index]["name"],
+                                    "partial_args": tool_calls[index]["arguments"],
+                                    "step": iteration + 1,
+                                }
+
                 print(f"[REACT AGENT] Stream complete. Total chunks: {chunk_count}")
                 print(f"[REACT AGENT] Full response length: {len(full_response)}")
                 print(f"[REACT AGENT] Tool calls: {list(tool_calls.keys())}")

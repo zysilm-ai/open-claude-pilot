@@ -388,6 +388,30 @@ class ChatWebSocketHandler:
                         "step": event.get("step", 0)
                     })
 
+                elif event_type == "action_streaming":
+                    # Real-time feedback when tool name is first received
+                    tool_name = event.get("tool")
+                    status = event.get("status", "streaming")
+                    print(f"[AGENT] Action Streaming: {tool_name} ({status})")
+                    await self.websocket.send_json({
+                        "type": "action_streaming",
+                        "tool": tool_name,
+                        "status": status,
+                        "step": event.get("step", 0)
+                    })
+
+                elif event_type == "action_args_chunk":
+                    # Real-time argument chunks as they're being assembled
+                    tool_name = event.get("tool")
+                    partial_args = event.get("partial_args", "")
+                    print(f"[AGENT] Action Args Chunk: {tool_name} - {partial_args[:50]}...")
+                    await self.websocket.send_json({
+                        "type": "action_args_chunk",
+                        "tool": tool_name,
+                        "partial_args": partial_args,
+                        "step": event.get("step", 0)
+                    })
+
                 elif event_type == "action":
                     # Agent is using a tool
                     tool_name = event.get("tool")

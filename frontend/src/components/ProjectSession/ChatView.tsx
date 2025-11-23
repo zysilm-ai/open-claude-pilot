@@ -20,12 +20,15 @@ export default function ChatView({ session }: ChatViewProps) {
     streamingMessage,
     isStreaming,
     agentActions,
+    streamEvents,
     error,
     appendStreamingMessage,
     setStreaming,
     clearStreamingMessage,
     addAgentAction,
     clearAgentActions,
+    addStreamEvent,
+    clearStreamEvents,
     setError,
     clearError,
   } = useChatStore();
@@ -49,11 +52,17 @@ export default function ChatView({ session }: ChatViewProps) {
           setStreaming(true);
           clearStreamingMessage();
           clearAgentActions();
+          clearStreamEvents();  // Clear unified stream
           break;
 
         case 'chunk':
           if (message.content) {
             appendStreamingMessage(message.content);
+            // Add to unified stream
+            addStreamEvent({
+              type: 'chunk',
+              content: message.content,
+            });
           }
           break;
 
@@ -65,26 +74,67 @@ export default function ChatView({ session }: ChatViewProps) {
               content: message.content,
               step: message.step,
             });
+            // Add to unified stream
+            addStreamEvent({
+              type: 'thought',
+              content: message.content,
+              step: message.step,
+            });
           }
           break;
 
+        case 'action_streaming':
+          // Immediate feedback that tool is being prepared
+          const streamingAction = {
+            type: 'action_streaming' as const,
+            content: `Preparing ${message.tool}...`,
+            tool: message.tool,
+            status: message.status,
+            step: message.step,
+          };
+          addAgentAction(streamingAction);
+          addStreamEvent(streamingAction);  // Add to unified stream
+          break;
+
         case 'action':
-          addAgentAction({
-            type: 'action',
+          const action = {
+            type: 'action' as const,
             content: `Using tool: ${message.tool}`,
             tool: message.tool,
             args: message.args,
             step: message.step,
+          };
+          addAgentAction(action);
+          addStreamEvent(action);  // Add to unified stream
+          break;
+
+        case 'action_args_chunk':
+          // Real-time argument streaming - show progressive build-up
+          console.log('[ChatView] ACTION_ARGS_CHUNK received:', {
+            tool: message.tool,
+            partial_args: message.partial_args,
+            step: message.step
           });
+          const argsChunk = {
+            type: 'action_args_chunk' as const,
+            content: message.partial_args || '',
+            tool: message.tool,
+            partial_args: message.partial_args,
+            step: message.step,
+          };
+          addStreamEvent(argsChunk);
+          console.log('[ChatView] Added action_args_chunk to stream events');
           break;
 
         case 'observation':
-          addAgentAction({
-            type: 'observation',
+          const observation = {
+            type: 'observation' as const,
             content: message.content || '',
             success: message.success,
             step: message.step,
-          });
+          };
+          addAgentAction(observation);
+          addStreamEvent(observation);  // Add to unified stream
           break;
 
         case 'end':
@@ -161,6 +211,7 @@ export default function ChatView({ session }: ChatViewProps) {
         streamingMessage={streamingMessage}
         isStreaming={isStreaming}
         agentActions={agentActions}
+        streamEvents={streamEvents}
       />
 
       {error && (

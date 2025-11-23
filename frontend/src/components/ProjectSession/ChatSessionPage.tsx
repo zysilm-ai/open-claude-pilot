@@ -121,6 +121,25 @@ export default function ChatSessionPage() {
           content: data.content,
           step: data.step,
         });
+      } else if (data.type === 'action_streaming') {
+        console.log('[ChatSessionPage] ACTION_STREAMING received:', data);
+        addAgentAction({
+          type: 'action_streaming',
+          content: `Preparing ${data.tool}...`,
+          tool: data.tool,
+          status: data.status,
+          step: data.step,
+        });
+      } else if (data.type === 'action_args_chunk') {
+        console.log('[ChatSessionPage] ACTION_ARGS_CHUNK received:', data);
+        // Add the chunk as an action so it triggers re-render
+        addAgentAction({
+          type: 'action_args_chunk',
+          content: data.partial_args || '',
+          tool: data.tool,
+          partial_args: data.partial_args,
+          step: data.step,
+        });
       } else if (data.type === 'action') {
         addAgentAction({
           type: 'action',
@@ -297,13 +316,43 @@ export default function ChatSessionPage() {
                     {/* Show real-time agent actions for the last streaming message */}
                     {message.role === 'assistant' && agentActions && agentActions.length > 0 && index === messages.length - 1 && (
                       <div className="agent-actions-inline">
-                        {agentActions.map((action, idx) => (
+                        {agentActions
+                          // Filter to show only the LAST action_args_chunk per tool
+                          .filter((action, idx, arr) => {
+                            if (action.type === 'action_args_chunk') {
+                              // Find if there's a later action_args_chunk for the same tool
+                              const laterChunk = arr.slice(idx + 1).find(
+                                a => a.type === 'action_args_chunk' && a.tool === action.tool
+                              );
+                              return !laterChunk; // Only keep if there's no later chunk
+                            }
+                            return true; // Keep all other action types
+                          })
+                          .map((action, idx) => (
                           <div key={idx} className={`action-block action-${action.type}`}>
                             {action.type === 'thought' && (
                               <details className="thought-details" open>
                                 <summary>💭 Thinking... (Step {action.step})</summary>
                                 <div className="thought-content">{action.content}</div>
                               </details>
+                            )}
+                            {action.type === 'action_streaming' && (
+                              <div className="action-usage streaming">
+                                <div className="action-header">
+                                  <span className="action-icon">⏳</span>
+                                  <strong>Preparing {action.tool}...</strong>
+                                  <span className="status-badge">{action.status}</span>
+                                </div>
+                              </div>
+                            )}
+                            {action.type === 'action_args_chunk' && (
+                              <div className="action-usage args-streaming">
+                                <div className="action-header">
+                                  <span className="action-icon">📝</span>
+                                  <strong>{action.tool}</strong>
+                                </div>
+                                <pre className="action-args partial">{action.partial_args || action.content}</pre>
+                              </div>
                             )}
                             {action.type === 'action' && (
                               <div className="action-usage">
