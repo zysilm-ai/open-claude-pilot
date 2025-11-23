@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState, useCallback } from 'react';
+import { useEffect, useRef, useState, useCallback, memo, useMemo, Profiler } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
@@ -218,6 +218,213 @@ const FileWriteActionArgs = ({ args }: { args: any }) => {
   );
 };
 
+// Memoized message list to prevent re-renders when input changes
+const MessagesList = memo(({
+  visibleMessages,
+  messages,
+  visibleMessageCount,
+  streamEvents,
+  hasHiddenMessages,
+  setVisibleMessageCount,
+  formatActionArgs,
+  formatObservationContent,
+  renderStreamEvent
+}: any) => {
+  return (
+    <>
+      {hasHiddenMessages && (
+        <div style={{ textAlign: 'center', padding: '12px' }}>
+          <button
+            onClick={() => setVisibleMessageCount((prev: number) => prev + 50)}
+            style={{
+              padding: '8px 16px',
+              background: '#4a90e2',
+              color: 'white',
+              border: 'none',
+              borderRadius: '6px',
+              cursor: 'pointer',
+              fontSize: '14px'
+            }}
+          >
+            Load {Math.min(50, messages.length - visibleMessageCount)} older messages
+          </button>
+        </div>
+      )}
+      {visibleMessages.map((message: any, visibleIndex: number) => {
+        // Calculate actual index in full messages array
+        const startIndex = Math.max(0, messages.length - visibleMessageCount);
+        const actualIndex = startIndex + visibleIndex;
+        const isLastMessage = actualIndex === messages.length - 1;
+
+        return (
+          <div key={message.id || visibleIndex} className={`message-wrapper ${message.role}`}>
+            <div className="message-content">
+              <div className="message-role">
+                {message.role === 'user' ? (
+                  <div className="avatar user-avatar">You</div>
+                ) : (
+                  <div className="avatar assistant-avatar">AI</div>
+                )}
+              </div>
+              <div className="message-text">
+                {(() => {
+                  const hasPersistedActions = message.role === 'assistant' &&
+                                              message.agent_actions &&
+                                              Array.isArray(message.agent_actions) &&
+                                              message.agent_actions.length > 0;
+
+                  return hasPersistedActions ? (
+                    <div className="agent-actions-inline">
+                      {message.agent_actions
+                        .slice()
+                        .sort((a: any, b: any) => {
+                          const timeA = new Date(a.created_at).getTime();
+                          const timeB = new Date(b.created_at).getTime();
+                          return timeA - timeB;
+                        })
+                        .map((action: any, idx: number) => {
+                        const isFileWrite = action.action_type && (
+                          action.action_type.toLowerCase().includes('file_write') ||
+                          action.action_type.toLowerCase().includes('write_file') ||
+                          action.action_type.toLowerCase().includes('writefile')
+                        );
+
+                        return (
+                          <div key={idx} className="action-block action-action">
+                            <div className="action-usage">
+                              <div className="action-header">
+                                <span className="action-icon">🔧</span>
+                                <strong>Used {action.action_type}</strong>
+                              </div>
+                              {action.action_input && (
+                                isFileWrite ? (
+                                  <FileWriteActionArgs args={action.action_input} />
+                                ) : (
+                                  <pre className="action-args">{formatActionArgs(action.action_input)}</pre>
+                                )
+                              )}
+                              {action.action_output && (
+                                <div className={`observation ${action.status === 'success' ? 'success' : 'error'}`}>
+                                  <div className="observation-header">
+                                    <span className="observation-icon">
+                                      {action.status === 'success' ? '✅' : '❌'}
+                                    </span>
+                                    <strong>Result</strong>
+                                  </div>
+                                  <pre className="observation-content">{formatObservationContent(action.action_output)}</pre>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ) : null;
+                })()}
+
+                {message.role === 'assistant' && isLastMessage && streamEvents && streamEvents.length > 0 && (
+                  <div className="message-body">
+                    {(() => {
+                      const filteredEvents = streamEvents.filter((event: any, idx: number, arr: any[]) => {
+                        if (event.type === 'action_streaming') {
+                          return false;
+                        }
+
+                        if (event.type === 'action_args_chunk') {
+                          const hasAction = arr.find(
+                            (e: any) => e.type === 'action' && e.tool === event.tool
+                          );
+                          if (hasAction) return false;
+
+                          const laterChunk = arr.slice(idx + 1).find(
+                            (e: any) => e.type === 'action_args_chunk' && e.tool === event.tool
+                          );
+                          return !laterChunk;
+                        }
+
+                        return true;
+                      });
+
+                      const renderedElements: JSX.Element[] = [];
+                      let accumulatedChunks = '';
+                      let chunkStartIndex = 0;
+
+                      filteredEvents.forEach((event: any, idx: number) => {
+                        if (event.type === 'chunk') {
+                          if (accumulatedChunks === '') {
+                            chunkStartIndex = idx;
+                          }
+                          accumulatedChunks += event.content;
+                        } else {
+                          if (accumulatedChunks) {
+                            renderedElements.push(
+                              <ReactMarkdown
+                                key={`chunk-${chunkStartIndex}`}
+                                remarkPlugins={[remarkGfm]}
+                                components={{ code: CodeBlock }}
+                              >
+                                {accumulatedChunks}
+                              </ReactMarkdown>
+                            );
+                            accumulatedChunks = '';
+                          }
+                          renderedElements.push(renderStreamEvent(event, idx));
+                        }
+                      });
+
+                      if (accumulatedChunks) {
+                        renderedElements.push(
+                          <ReactMarkdown
+                            key={`chunk-${chunkStartIndex}`}
+                            remarkPlugins={[remarkGfm]}
+                            components={{ code: CodeBlock }}
+                          >
+                            {accumulatedChunks}
+                          </ReactMarkdown>
+                        );
+                      }
+
+                      return renderedElements;
+                    })()}
+                    <span className="streaming-cursor">▋</span>
+                  </div>
+                )}
+
+                {message.role === 'assistant' && isLastMessage && (!streamEvents || streamEvents.length === 0) && message.content && (
+                  <div className="message-body">
+                    <ReactMarkdown remarkPlugins={[remarkGfm]} components={{ code: CodeBlock }}>
+                      {message.content}
+                    </ReactMarkdown>
+                    <span className="streaming-cursor">▋</span>
+                  </div>
+                )}
+
+                {message.role === 'assistant' && !isLastMessage && message.content && (
+                  <div className="message-body">
+                    <ReactMarkdown remarkPlugins={[remarkGfm]} components={{ code: CodeBlock }}>
+                      {message.content}
+                    </ReactMarkdown>
+                  </div>
+                )}
+
+                {message.role === 'user' && message.content && (
+                  <div className="message-body">
+                    <ReactMarkdown remarkPlugins={[remarkGfm]} components={{ code: CodeBlock }}>
+                      {message.content}
+                    </ReactMarkdown>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        );
+      })}
+    </>
+  );
+});
+
+MessagesList.displayName = 'MessagesList';
+
 export default function ChatSessionPage() {
   const { projectId, sessionId } = useParams<{ projectId: string; sessionId: string }>();
   const navigate = useNavigate();
@@ -233,8 +440,10 @@ export default function ChatSessionPage() {
   const [isSending, setIsSending] = useState(false);
   const [messages, setMessages] = useState<any[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [visibleMessageCount, setVisibleMessageCount] = useState(50); // Show last 50 messages
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const wsRef = useRef<WebSocket | null>(null);
+  const queryClient = useQueryClient();
 
   // Fetch session
   const { data: session } = useQuery({
@@ -254,22 +463,10 @@ export default function ChatSessionPage() {
 
   // Load messages from API
   useEffect(() => {
-    console.log('[ChatSessionPage] useEffect triggered. sessionId:', sessionId);
-    console.log('[ChatSessionPage] messagesData:', messagesData);
     if (messagesData?.messages) {
-      console.log('[ChatSessionPage] Loading messages from API:', messagesData.messages.length);
-      console.log('[ChatSessionPage] Total from API:', messagesData.total);
-      console.log('[ChatSessionPage] Full messagesData:', JSON.stringify(messagesData, null, 2));
-      // Log agent actions for debugging
-      messagesData.messages.forEach((msg: any, idx: number) => {
-        console.log(`[ChatSessionPage] Message ${idx}: role=${msg.role}, has_actions=${msg.agent_actions?.length || 0}`);
-        if (msg.agent_actions && msg.agent_actions.length > 0) {
-          console.log(`[ChatSessionPage] Message ${msg.id.substring(0, 8)} has ${msg.agent_actions.length} agent actions:`, msg.agent_actions);
-        }
-      });
       setMessages(messagesData.messages);
     }
-  }, [messagesData, sessionId]);
+  }, [messagesData]);
 
   // Check for pending message from quick start
   useEffect(() => {
@@ -300,179 +497,24 @@ export default function ChatSessionPage() {
     }
   }, [sessionId, wsRef.current]);
 
-  // Auto-scroll to bottom
+  // Compute visible messages (only render last N messages for performance)
+  const visibleMessages = useMemo(() => {
+    if (!messages || messages.length === 0) return [];
+    const startIndex = Math.max(0, messages.length - visibleMessageCount);
+    return messages.slice(startIndex);
+  }, [messages, visibleMessageCount]);
+
+  const hasHiddenMessages = messages.length > visibleMessageCount;
+
+  // Auto-scroll to bottom only when sending (not on every stream event)
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, agentActions, streamEvents]);
-
-  // WebSocket connection
-  useEffect(() => {
-    if (!sessionId) return;
-
-    const ws = new WebSocket(`ws://127.0.0.1:8000/api/v1/chats/${sessionId}/stream`);
-    wsRef.current = ws;
-
-    ws.onopen = () => {
-      console.log('WebSocket connected');
-    };
-
-    ws.onmessage = (event) => {
-      const data = JSON.parse(event.data);
-
-      if (data.type === 'start') {
-        console.log('[ChatSessionPage] START event - setting isSending to TRUE');
-        setIsSending(true); // Enable stop button
-        clearAgentActions();
-        clearStreamEvents(); // Clear unified stream
-        setMessages((prev) => [
-          ...prev,
-          {
-            id: 'temp-' + Date.now(),
-            role: 'assistant',
-            content: '',
-            created_at: new Date().toISOString(),
-          },
-        ]);
-      } else if (data.type === 'cancelled') {
-        console.log('[ChatSessionPage] Response cancelled');
-        setIsSending(false);
-      } else if (data.type === 'thought') {
-        const thought = {
-          type: 'thought' as const,
-          content: data.content,
-          step: data.step,
-        };
-        addAgentAction(thought);
-        addStreamEvent(thought);
-      } else if (data.type === 'action_streaming') {
-        console.log('[ChatSessionPage] ACTION_STREAMING received:', data);
-        const streamingAction = {
-          type: 'action_streaming' as const,
-          content: `Preparing ${data.tool}...`,
-          tool: data.tool,
-          status: data.status,
-          step: data.step,
-        };
-        addAgentAction(streamingAction);
-        addStreamEvent(streamingAction);
-      } else if (data.type === 'action_args_chunk') {
-        console.log('[ChatSessionPage] ACTION_ARGS_CHUNK received:', data);
-        console.log('[ChatSessionPage] Document hidden:', document.hidden);
-        const argsChunk = {
-          type: 'action_args_chunk' as const,
-          content: data.partial_args || '',
-          tool: data.tool,
-          partial_args: data.partial_args,
-          step: data.step,
-        };
-        addAgentAction(argsChunk);
-        addStreamEvent(argsChunk);
-        console.log('[ChatSessionPage] Added argsChunk to streamEvents');
-      } else if (data.type === 'action') {
-        const action = {
-          type: 'action' as const,
-          content: `Using tool: ${data.tool}`,
-          tool: data.tool,
-          args: data.args,
-          step: data.step,
-        };
-        addAgentAction(action);
-        addStreamEvent(action);
-      } else if (data.type === 'observation') {
-        const observation = {
-          type: 'observation' as const,
-          content: data.content,
-          success: data.success,
-          step: data.step,
-        };
-        addAgentAction(observation);
-        addStreamEvent(observation);
-      } else if (data.type === 'chunk') {
-        // Add chunk to unified stream
-        addStreamEvent({
-          type: 'chunk',
-          content: data.content,
-        });
-        // Update the last message with new content
-        setMessages((prev) => {
-          const newMessages = [...prev];
-          const lastMsg = newMessages[newMessages.length - 1];
-          if (lastMsg && lastMsg.role === 'assistant') {
-            lastMsg.content += data.content;
-          }
-          return newMessages;
-        });
-      } else if (data.type === 'end') {
-        setIsSending(false);
-        // Refresh messages from API using React Query
-        setTimeout(() => {
-          refetchMessages();
-        }, 500);
-      } else if (data.type === 'error') {
-        console.error('WebSocket error:', data.content);
-        setError(data.content || 'An error occurred');
-        setIsSending(false);
-      }
-    };
-
-    ws.onerror = (error) => {
-      console.error('WebSocket error:', error);
-      setIsSending(false);
-    };
-
-    ws.onclose = () => {
-      console.log('WebSocket closed');
-      setIsSending(false);
-    };
-
-    return () => {
-      console.log('[ChatSessionPage] Cleaning up WebSocket');
-      ws.close();
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sessionId]); // Only sessionId - store functions are stable
-
-  const handleSend = async (messageText?: string) => {
-    const textToSend = messageText || input;
-    if (!textToSend.trim() || isSending || !wsRef.current) return;
-
-    setError(null); // Clear any previous errors
-    setInput('');
-
-    // Add user message to UI
-    const userMsg = {
-      id: 'temp-user-' + Date.now(),
-      role: 'user' as const,
-      content: textToSend,
-      created_at: new Date().toISOString(),
-    };
-    setMessages((prev) => [...prev, userMsg]);
-
-    // Send via WebSocket (isSending will be set to true when 'start' event is received)
-    wsRef.current.send(
-      JSON.stringify({
-        type: 'message',
-        content: textToSend,
-      })
-    );
-  };
-
-  const handleCancel = () => {
-    console.log('[ChatSessionPage] Cancel button clicked');
-    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify({ type: 'cancel' }));
+    if (isSending) {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'auto' });
     }
-  };
+  }, [messages.length]); // Only when message count changes
 
-  const handleKeyPress = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      handleSend();
-    }
-  };
-
-  // Render a single stream event
-  const renderStreamEvent = (event: any, index: number) => {
+  // Memoized renderStreamEvent to prevent re-renders
+  const renderStreamEvent = useCallback((event: any, index: number) => {
     switch (event.type) {
       case 'chunk':
         return <span key={index}>{event.content}</span>;
@@ -536,6 +578,166 @@ export default function ChatSessionPage() {
       default:
         return null;
     }
+  }, []); // No dependencies since formatActionArgs and formatObservationContent are stable
+
+  // WebSocket connection
+  useEffect(() => {
+    if (!sessionId) return;
+
+    const ws = new WebSocket(`ws://127.0.0.1:8000/api/v1/chats/${sessionId}/stream`);
+    wsRef.current = ws;
+
+    ws.onopen = () => {
+      console.log('WebSocket connected');
+    };
+
+    ws.onmessage = (event) => {
+      const data = JSON.parse(event.data);
+
+      if (data.type === 'start') {
+        setIsSending(true); // Enable stop button
+        clearAgentActions();
+        clearStreamEvents(); // Clear unified stream
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: 'temp-' + Date.now(),
+            role: 'assistant',
+            content: '',
+            created_at: new Date().toISOString(),
+          },
+        ]);
+      } else if (data.type === 'cancelled') {
+        setIsSending(false);
+      } else if (data.type === 'thought') {
+        const thought = {
+          type: 'thought' as const,
+          content: data.content,
+          step: data.step,
+        };
+        addAgentAction(thought);
+        addStreamEvent(thought);
+      } else if (data.type === 'action_streaming') {
+        const streamingAction = {
+          type: 'action_streaming' as const,
+          content: `Preparing ${data.tool}...`,
+          tool: data.tool,
+          status: data.status,
+          step: data.step,
+        };
+        addAgentAction(streamingAction);
+        addStreamEvent(streamingAction);
+      } else if (data.type === 'action_args_chunk') {
+        const argsChunk = {
+          type: 'action_args_chunk' as const,
+          content: data.partial_args || '',
+          tool: data.tool,
+          partial_args: data.partial_args,
+          step: data.step,
+        };
+        addAgentAction(argsChunk);
+        addStreamEvent(argsChunk);
+      } else if (data.type === 'action') {
+        const action = {
+          type: 'action' as const,
+          content: `Using tool: ${data.tool}`,
+          tool: data.tool,
+          args: data.args,
+          step: data.step,
+        };
+        addAgentAction(action);
+        addStreamEvent(action);
+      } else if (data.type === 'observation') {
+        const observation = {
+          type: 'observation' as const,
+          content: data.content,
+          success: data.success,
+          step: data.step,
+        };
+        addAgentAction(observation);
+        addStreamEvent(observation);
+      } else if (data.type === 'chunk') {
+        // Add chunk to unified stream
+        addStreamEvent({
+          type: 'chunk',
+          content: data.content,
+        });
+        // Update the last message with new content
+        setMessages((prev) => {
+          const newMessages = [...prev];
+          const lastMsg = newMessages[newMessages.length - 1];
+          if (lastMsg && lastMsg.role === 'assistant') {
+            lastMsg.content += data.content;
+          }
+          return newMessages;
+        });
+      } else if (data.type === 'end') {
+        setIsSending(false);
+        // Clear stream events
+        clearStreamEvents();
+        // Invalidate and refetch messages immediately
+        queryClient.invalidateQueries({ queryKey: ['messages', sessionId] });
+      } else if (data.type === 'error') {
+        console.error('WebSocket error:', data.content);
+        setError(data.content || 'An error occurred');
+        setIsSending(false);
+      }
+    };
+
+    ws.onerror = (error) => {
+      console.error('WebSocket error:', error);
+      setIsSending(false);
+    };
+
+    ws.onclose = () => {
+      console.log('WebSocket closed');
+      setIsSending(false);
+    };
+
+    return () => {
+      console.log('[ChatSessionPage] Cleaning up WebSocket');
+      ws.close();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessionId]); // Only sessionId - store functions are stable
+
+  const handleSend = async (messageText?: string) => {
+    const textToSend = messageText || input;
+    if (!textToSend.trim() || isSending || !wsRef.current) return;
+
+    setError(null); // Clear any previous errors
+    setInput('');
+
+    // Add user message to UI
+    const userMsg = {
+      id: 'temp-user-' + Date.now(),
+      role: 'user' as const,
+      content: textToSend,
+      created_at: new Date().toISOString(),
+    };
+    setMessages((prev) => [...prev, userMsg]);
+
+    // Send via WebSocket (isSending will be set to true when 'start' event is received)
+    wsRef.current.send(
+      JSON.stringify({
+        type: 'message',
+        content: textToSend,
+      })
+    );
+  };
+
+  const handleCancel = () => {
+    console.log('[ChatSessionPage] Cancel button clicked');
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({ type: 'cancel' }));
+    }
+  };
+
+  const handleKeyPress = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      handleSend();
+    }
   };
 
   return (
@@ -565,178 +767,17 @@ export default function ChatSessionPage() {
               <p>Ask me anything, and I'll help you with code, data analysis, and more.</p>
             </div>
           ) : (
-            messages.map((message, index) => (
-              <div key={message.id || index} className={`message-wrapper ${message.role}`}>
-                <div className="message-content">
-                  <div className="message-role">
-                    {message.role === 'user' ? (
-                      <div className="avatar user-avatar">You</div>
-                    ) : (
-                      <div className="avatar assistant-avatar">AI</div>
-                    )}
-                  </div>
-                  <div className="message-text">
-                    {/* Show persisted agent actions from database for all assistant messages */}
-                    {(() => {
-                      const hasPersistedActions = message.role === 'assistant' &&
-                                                  message.agent_actions &&
-                                                  Array.isArray(message.agent_actions) &&
-                                                  message.agent_actions.length > 0;
-
-                      if (hasPersistedActions) {
-                        console.log(`[ChatSessionPage] Rendering ${message.agent_actions.length} persisted actions for message ${message.id?.substring(0, 8)}`);
-                      }
-
-                      return hasPersistedActions ? (
-                        <div className="agent-actions-inline">
-                          {message.agent_actions
-                            .slice()
-                            .sort((a: any, b: any) => {
-                              // Sort by created_at timestamp in ascending order (earliest first)
-                              const timeA = new Date(a.created_at).getTime();
-                              const timeB = new Date(b.created_at).getTime();
-                              return timeA - timeB;
-                            })
-                            .map((action: any, idx: number) => {
-                            // Check if this is a file write action
-                            const isFileWrite = action.action_type && (
-                              action.action_type.toLowerCase().includes('file_write') ||
-                              action.action_type.toLowerCase().includes('write_file') ||
-                              action.action_type.toLowerCase().includes('writefile')
-                            );
-
-                            return (
-                              <div key={idx} className="action-block action-action">
-                                <div className="action-usage">
-                                  <div className="action-header">
-                                    <span className="action-icon">🔧</span>
-                                    <strong>Used {action.action_type}</strong>
-                                  </div>
-                                  {action.action_input && (
-                                    isFileWrite ? (
-                                      <FileWriteActionArgs args={action.action_input} />
-                                    ) : (
-                                      <pre className="action-args">{formatActionArgs(action.action_input)}</pre>
-                                    )
-                                  )}
-                                  {action.action_output && (
-                                    <div className={`observation ${action.status === 'success' ? 'success' : 'error'}`}>
-                                      <div className="observation-header">
-                                        <span className="observation-icon">
-                                          {action.status === 'success' ? '✅' : '❌'}
-                                        </span>
-                                        <strong>Result</strong>
-                                      </div>
-                                      <pre className="observation-content">{formatObservationContent(action.action_output)}</pre>
-                                    </div>
-                                  )}
-                                </div>
-                              </div>
-                            );
-                          })}
-                        </div>
-                      ) : null;
-                    })()}
-
-                    {/* Show unified stream for the last streaming message */}
-                    {message.role === 'assistant' && index === messages.length - 1 && streamEvents && streamEvents.length > 0 && (
-                      <div className="message-body">
-                        {(() => {
-                          // Filter events first
-                          const filteredEvents = streamEvents.filter((event, idx, arr) => {
-                            // Always hide action_streaming
-                            if (event.type === 'action_streaming') {
-                              return false;
-                            }
-
-                            // Hide action_args_chunk if we have action for the same tool
-                            if (event.type === 'action_args_chunk') {
-                              const hasAction = arr.find(
-                                e => e.type === 'action' && e.tool === event.tool
-                              );
-                              if (hasAction) return false;
-
-                              // Show only the LAST chunk for this tool
-                              const laterChunk = arr.slice(idx + 1).find(
-                                e => e.type === 'action_args_chunk' && e.tool === event.tool
-                              );
-                              return !laterChunk;
-                            }
-
-                            return true;
-                          });
-
-                          // Group consecutive chunks together for markdown rendering
-                          const renderedElements: JSX.Element[] = [];
-                          let accumulatedChunks = '';
-                          let chunkStartIndex = 0;
-
-                          filteredEvents.forEach((event, idx) => {
-                            if (event.type === 'chunk') {
-                              // Accumulate chunk content
-                              if (accumulatedChunks === '') {
-                                chunkStartIndex = idx;
-                              }
-                              accumulatedChunks += event.content;
-                            } else {
-                              // Non-chunk event: flush accumulated chunks as markdown first
-                              if (accumulatedChunks) {
-                                renderedElements.push(
-                                  <ReactMarkdown
-                                    key={`chunk-${chunkStartIndex}`}
-                                    remarkPlugins={[remarkGfm]}
-                                    components={{ code: CodeBlock }}
-                                  >
-                                    {accumulatedChunks}
-                                  </ReactMarkdown>
-                                );
-                                accumulatedChunks = '';
-                              }
-                              // Render the non-chunk event
-                              renderedElements.push(renderStreamEvent(event, idx));
-                            }
-                          });
-
-                          // Flush any remaining chunks
-                          if (accumulatedChunks) {
-                            renderedElements.push(
-                              <ReactMarkdown
-                                key={`chunk-${chunkStartIndex}`}
-                                remarkPlugins={[remarkGfm]}
-                                components={{ code: CodeBlock }}
-                              >
-                                {accumulatedChunks}
-                              </ReactMarkdown>
-                            );
-                          }
-
-                          return renderedElements;
-                        })()}
-                        <span className="streaming-cursor">▋</span>
-                      </div>
-                    )}
-
-                    {/* Message content for completed messages */}
-                    {message.role === 'assistant' && index < messages.length - 1 && message.content && (
-                      <div className="message-body">
-                        <ReactMarkdown remarkPlugins={[remarkGfm]} components={{ code: CodeBlock }}>
-                          {message.content}
-                        </ReactMarkdown>
-                      </div>
-                    )}
-
-                    {/* User messages always show content */}
-                    {message.role === 'user' && message.content && (
-                      <div className="message-body">
-                        <ReactMarkdown remarkPlugins={[remarkGfm]} components={{ code: CodeBlock }}>
-                          {message.content}
-                        </ReactMarkdown>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </div>
-            ))
+            <MessagesList
+              visibleMessages={visibleMessages}
+              messages={messages}
+              visibleMessageCount={visibleMessageCount}
+              streamEvents={streamEvents}
+              hasHiddenMessages={hasHiddenMessages}
+              setVisibleMessageCount={setVisibleMessageCount}
+              formatActionArgs={formatActionArgs}
+              formatObservationContent={formatObservationContent}
+              renderStreamEvent={renderStreamEvent}
+            />
           )}
           <div ref={messagesEndRef} />
         </div>

@@ -32,11 +32,13 @@ class AgentActionResponse(BaseModel):
         from_attributes = True
 
 
-class MessageResponse(MessageBase):
+class MessageResponse(BaseModel):
     """Schema for message response."""
     id: str
     chat_session_id: str
     role: MessageRole
+    content: str = Field(..., min_length=0)  # Allow empty content for streaming messages
+    message_metadata: Dict[str, Any | None] = Field(default_factory=dict)
     created_at: datetime
     agent_actions: List[AgentActionResponse] = Field(default_factory=list)
 

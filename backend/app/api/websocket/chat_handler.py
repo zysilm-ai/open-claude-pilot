@@ -12,6 +12,7 @@ from app.core.llm import create_llm_provider_with_db
 from app.core.agent.executor import ReActAgent
 from app.core.agent.tools import ToolRegistry, BashTool, FileReadTool, FileWriteTool, FileEditTool, SearchTool, SetupEnvironmentTool
 from app.core.sandbox.manager import get_container_manager
+from app.api.websocket.task_registry import get_agent_task_registry
 
 
 class ChatWebSocketHandler:
@@ -200,7 +201,7 @@ class ChatWebSocketHandler:
         llm_provider,
         agent_config: AgentConfiguration
     ):
-        """Handle simple LLM response without agent."""
+        """Handle simple LLM response without agent (with incremental saving)."""
         # Add system instructions if present
         messages = []
         if agent_config.system_instructions:
@@ -212,55 +213,99 @@ class ChatWebSocketHandler:
         # Add conversation history
         messages.extend(history)
 
+        # CRITICAL CHANGE: Create assistant message BEFORE starting generation
+        assistant_message = Message(
+            chat_session_id=session_id,
+            role=MessageRole.ASSISTANT,
+            content="",
+            message_metadata={"streaming": True},
+        )
+        self.db.add(assistant_message)
+        await self.db.flush()
+        await self.db.commit()
+        print(f"[SIMPLE RESPONSE] Created assistant message {assistant_message.id} at start")
+
         # Create cancel event
         self.cancel_event = asyncio.Event()
 
         # Stream response
         assistant_content = ""
-        await self.websocket.send_json({"type": "start"})
+        cancelled = False
+
+        # Batching for performance: only commit every N chunks
+        chunks_since_commit = 0
+        CHUNK_COMMIT_INTERVAL = 50  # Commit every 50 chunks
+
+        try:
+            await self.websocket.send_json({"type": "start"})
+        except:
+            print(f"[SIMPLE RESPONSE] WebSocket disconnected at start, continuing...")
 
         try:
             async for chunk in llm_provider.generate_stream(messages):
                 # Check for cancellation
                 if self.cancel_event.is_set():
                     print(f"[SIMPLE RESPONSE] Cancellation detected")
-                    await self.websocket.send_json({
-                        "type": "cancelled",
-                        "content": "Response cancelled by user"
-                    })
-                    return
+                    cancelled = True
+                    try:
+                        await self.websocket.send_json({
+                            "type": "cancelled",
+                            "content": "Response cancelled by user"
+                        })
+                    except:
+                        print(f"[SIMPLE RESPONSE] WebSocket disconnected, cannot send cancellation message")
+                    break
 
                 if isinstance(chunk, str):
                     assistant_content += chunk
-                    await self.websocket.send_json({
-                        "type": "chunk",
-                        "content": chunk
-                    })
+                    chunks_since_commit += 1
+
+                    try:
+                        await self.websocket.send_json({
+                            "type": "chunk",
+                            "content": chunk
+                        })
+                    except:
+                        print(f"[SIMPLE RESPONSE] WebSocket disconnected during chunk, continuing...")
+
+                    # BATCHED INCREMENTAL SAVE: Update message content, commit periodically
+                    assistant_message.content = assistant_content
+                    if chunks_since_commit >= CHUNK_COMMIT_INTERVAL:
+                        await self.db.commit()
+                        chunks_since_commit = 0
+                        print(f"[SIMPLE RESPONSE] Committed content update ({len(assistant_content)} chars)")
+
         except asyncio.CancelledError:
             print(f"[SIMPLE RESPONSE] Task cancelled")
-            await self.websocket.send_json({
-                "type": "cancelled",
-                "content": "Response cancelled by user"
-            })
-            return
+            cancelled = True
+            try:
+                await self.websocket.send_json({
+                    "type": "cancelled",
+                    "content": "Response cancelled by user"
+                })
+            except:
+                print(f"[SIMPLE RESPONSE] WebSocket disconnected, cannot send cancellation message")
         finally:
             self.cancel_event = None
 
-        # Save assistant message
-        assistant_message = Message(
-            chat_session_id=session_id,
-            role=MessageRole.ASSISTANT,
-            content=assistant_content,
-            message_metadata={},
-        )
-        self.db.add(assistant_message)
+        # Update final message state
+        assistant_message.content = assistant_content if assistant_content else "Response completed."
+        assistant_message.message_metadata = {
+            "streaming": False,
+            "cancelled": cancelled
+        }
         await self.db.commit()
+        print(f"[SIMPLE RESPONSE] Final message saved with ID: {assistant_message.id}")
 
         # Send completion
-        await self.websocket.send_json({
-            "type": "end",
-            "message_id": assistant_message.id
-        })
+        try:
+            await self.websocket.send_json({
+                "type": "end",
+                "message_id": assistant_message.id,
+                "cancelled": cancelled
+            })
+        except:
+            print(f"[SIMPLE RESPONSE] WebSocket disconnected, cannot send end message")
 
     async def _handle_agent_response(
         self,
@@ -299,7 +344,7 @@ class ChatWebSocketHandler:
         llm_provider,
         agent_config: AgentConfiguration
     ):
-        """Implementation of agent response handling."""
+        """Implementation of agent response handling with incremental saving."""
         # Get container manager
         container_manager = get_container_manager()
 
@@ -345,15 +390,35 @@ class ChatWebSocketHandler:
             system_instructions=agent_config.system_instructions,
         )
 
+        # CRITICAL CHANGE: Create assistant message BEFORE starting execution
+        # This ensures we can save partial progress even if connection drops
+        assistant_message = Message(
+            chat_session_id=session_id,
+            role=MessageRole.ASSISTANT,
+            content="",  # Will be updated incrementally
+            message_metadata={
+                "agent_mode": True,
+                "streaming": True  # Mark as currently streaming
+            },
+        )
+        self.db.add(assistant_message)
+        await self.db.flush()  # Get the message ID
+        await self.db.commit()  # Commit to save it
+        print(f"[AGENT] Created assistant message {assistant_message.id} at start of execution")
+
         # Create cancel event
         self.cancel_event = asyncio.Event()
 
-        # Stream agent execution
+        # Track state
         assistant_content = ""
-        agent_actions = []
         has_error = False
         error_message = None
         cancelled = False
+        current_action: Optional[AgentAction] = None
+
+        # Batching for performance: only commit every N chunks or when action completes
+        chunks_since_commit = 0
+        CHUNK_COMMIT_INTERVAL = 50  # Commit every 50 chunks
 
         await self.websocket.send_json({"type": "start"})
         print(f"[AGENT] Starting agent execution loop...")
@@ -364,7 +429,6 @@ class ChatWebSocketHandler:
                 event_count += 1
                 event_type = event.get("type")
                 print(f"[AGENT] Event #{event_count}: {event_type}")
-                print(f"  Full event: {event}")
 
                 if event_type == "cancelled":
                     # Agent was cancelled
@@ -378,216 +442,259 @@ class ChatWebSocketHandler:
                     break
 
                 elif event_type == "thought":
-                    # Agent is thinking
+                    # Agent is thinking - add to content
                     chunk = event.get("content", "")
                     assistant_content += chunk
+                    chunks_since_commit += 1
                     print(f"[AGENT] Thought: {chunk[:100]}...")
-                    await self.websocket.send_json({
-                        "type": "thought",
-                        "content": chunk,
-                        "step": event.get("step", 0)
-                    })
+
+                    # Send to WebSocket if connected
+                    try:
+                        await self.websocket.send_json({
+                            "type": "thought",
+                            "content": chunk,
+                            "step": event.get("step", 0)
+                        })
+                    except:
+                        print(f"[AGENT] WebSocket disconnected during thought, continuing execution...")
+
+                    # Batched commit: only commit periodically
+                    assistant_message.content = assistant_content
+                    if chunks_since_commit >= CHUNK_COMMIT_INTERVAL:
+                        await self.db.commit()
+                        chunks_since_commit = 0
+                        print(f"[AGENT] Committed content update ({len(assistant_content)} chars)")
 
                 elif event_type == "action_streaming":
                     # Real-time feedback when tool name is first received
                     tool_name = event.get("tool")
                     status = event.get("status", "streaming")
                     print(f"[AGENT] Action Streaming: {tool_name} ({status})")
-                    await self.websocket.send_json({
-                        "type": "action_streaming",
-                        "tool": tool_name,
-                        "status": status,
-                        "step": event.get("step", 0)
-                    })
+
+                    try:
+                        await self.websocket.send_json({
+                            "type": "action_streaming",
+                            "tool": tool_name,
+                            "status": status,
+                            "step": event.get("step", 0)
+                        })
+                    except:
+                        print(f"[AGENT] WebSocket disconnected during action_streaming, continuing...")
 
                 elif event_type == "action_args_chunk":
                     # Real-time argument chunks as they're being assembled
                     tool_name = event.get("tool")
                     partial_args = event.get("partial_args", "")
                     print(f"[AGENT] Action Args Chunk: {tool_name} - {partial_args[:50]}...")
-                    await self.websocket.send_json({
-                        "type": "action_args_chunk",
-                        "tool": tool_name,
-                        "partial_args": partial_args,
-                        "step": event.get("step", 0)
-                    })
+
+                    try:
+                        await self.websocket.send_json({
+                            "type": "action_args_chunk",
+                            "tool": tool_name,
+                            "partial_args": partial_args,
+                            "step": event.get("step", 0)
+                        })
+                    except:
+                        print(f"[AGENT] WebSocket disconnected during action_args_chunk, continuing...")
 
                 elif event_type == "action":
-                    # Agent is using a tool
+                    # Agent is using a tool - save immediately to database
                     tool_name = event.get("tool")
                     tool_args = event.get("args", {})
                     print(f"[AGENT] Action: {tool_name}")
                     print(f"  Args: {tool_args}")
-                    await self.websocket.send_json({
-                        "type": "action",
-                        "tool": tool_name,
-                        "args": tool_args,
-                        "step": event.get("step", 0)
-                    })
 
-                    # Save agent action to database (will set message_id after creating assistant message)
-                    action = {
-                        "action_type": tool_name,
-                        "action_input": tool_args,
-                        "action_output": None,
-                        "status": "pending"
-                    }
-                    agent_actions.append(action)
+                    try:
+                        await self.websocket.send_json({
+                            "type": "action",
+                            "tool": tool_name,
+                            "args": tool_args,
+                            "step": event.get("step", 0)
+                        })
+                    except:
+                        print(f"[AGENT] WebSocket disconnected during action, continuing...")
+
+                    # INCREMENTAL SAVE: Save action to database immediately
+                    current_action = AgentAction(
+                        message_id=assistant_message.id,
+                        action_type=tool_name,
+                        action_input=tool_args,
+                        action_output=None,
+                        status="pending"
+                    )
+                    self.db.add(current_action)
+                    await self.db.commit()
+                    print(f"[AGENT] Saved action {current_action.id} to database")
 
                 elif event_type == "observation":
-                    # Tool execution result
+                    # Tool execution result - update the action in database
                     observation = event.get("content", "")
                     success = event.get("success", True)
                     print(f"[AGENT] Observation (success={success}): {observation[:100]}...")
-                    await self.websocket.send_json({
-                        "type": "observation",
-                        "content": observation,
-                        "success": success,
-                        "step": event.get("step", 0)
-                    })
 
-                    # Update last action with result
-                    if agent_actions:
-                        agent_actions[-1]["action_output"] = {
+                    try:
+                        await self.websocket.send_json({
+                            "type": "observation",
+                            "content": observation,
+                            "success": success,
+                            "step": event.get("step", 0)
+                        })
+                    except:
+                        print(f"[AGENT] WebSocket disconnected during observation, continuing...")
+
+                    # INCREMENTAL SAVE: Update the current action with result
+                    if current_action:
+                        current_action.action_output = {
                             "result": observation,
                             "success": success
                         }
-                        agent_actions[-1]["status"] = "success" if success else "error"
+                        current_action.status = "success" if success else "error"
+                        await self.db.commit()
+                        chunks_since_commit = 0  # Reset counter after action commit
+                        print(f"[AGENT] Updated action {current_action.id} with result")
 
-                    # CRITICAL FIX: If setup_environment just succeeded, update tool registry
-                    if agent_actions and agent_actions[-1]["action_type"] == "setup_environment" and success:
-                        print(f"[AGENT] setup_environment succeeded! Updating tool registry with sandbox tools...")
+                        # CRITICAL FIX: If setup_environment just succeeded, update tool registry
+                        if current_action.action_type == "setup_environment" and success:
+                            print(f"[AGENT] setup_environment succeeded! Updating tool registry with sandbox tools...")
 
-                        # Refresh session from database to get updated environment_type
-                        session_query = select(ChatSession).where(ChatSession.id == session_id)
-                        session_result = await self.db.execute(session_query)
-                        session = session_result.scalar_one_or_none()
+                            # Refresh session from database to get updated environment_type
+                            await self.db.refresh(session)
 
-                        if session and session.environment_type:
-                            # Get or create container
-                            container = await container_manager.get_container(session_id)
-                            if not container:
-                                container = await container_manager.create_container(
-                                    session_id,
-                                    session.environment_type,
-                                    session.environment_config or {}
-                                )
+                            if session and session.environment_type:
+                                # Get or create container
+                                container = await container_manager.get_container(session_id)
+                                if not container:
+                                    container = await container_manager.create_container(
+                                        session_id,
+                                        session.environment_type,
+                                        session.environment_config or {}
+                                    )
 
-                            # Clear existing tools and register sandbox tools
-                            tool_registry._tools = {}  # Reset tool registry
+                                # Clear existing tools and register sandbox tools
+                                tool_registry._tools = {}  # Reset tool registry
 
-                            if "bash" in agent_config.enabled_tools:
-                                tool_registry.register(BashTool(container))
-                                print(f"[AGENT]   ✓ Registered BashTool")
-                            if "file_read" in agent_config.enabled_tools:
-                                tool_registry.register(FileReadTool(container))
-                                print(f"[AGENT]   ✓ Registered FileReadTool")
-                            if "file_write" in agent_config.enabled_tools:
-                                tool_registry.register(FileWriteTool(container))
-                                print(f"[AGENT]   ✓ Registered FileWriteTool")
-                            if "file_edit" in agent_config.enabled_tools:
-                                tool_registry.register(FileEditTool(container))
-                                print(f"[AGENT]   ✓ Registered FileEditTool")
-                            if "search" in agent_config.enabled_tools:
-                                tool_registry.register(SearchTool(container))
-                                print(f"[AGENT]   ✓ Registered SearchTool")
+                                if "bash" in agent_config.enabled_tools:
+                                    tool_registry.register(BashTool(container))
+                                    print(f"[AGENT]   ✓ Registered BashTool")
+                                if "file_read" in agent_config.enabled_tools:
+                                    tool_registry.register(FileReadTool(container))
+                                    print(f"[AGENT]   ✓ Registered FileReadTool")
+                                if "file_write" in agent_config.enabled_tools:
+                                    tool_registry.register(FileWriteTool(container))
+                                    print(f"[AGENT]   ✓ Registered FileWriteTool")
+                                if "file_edit" in agent_config.enabled_tools:
+                                    tool_registry.register(FileEditTool(container))
+                                    print(f"[AGENT]   ✓ Registered FileEditTool")
+                                if "search" in agent_config.enabled_tools:
+                                    tool_registry.register(SearchTool(container))
+                                    print(f"[AGENT]   ✓ Registered SearchTool")
 
-                            print(f"[AGENT] Tool registry updated! Now has {len(tool_registry._tools)} tools")
-                        else:
-                            print(f"[AGENT] WARNING: setup_environment succeeded but session.environment_type is still None")
+                                print(f"[AGENT] Tool registry updated! Now has {len(tool_registry._tools)} tools")
+                            else:
+                                print(f"[AGENT] WARNING: setup_environment succeeded but session.environment_type is still None")
+
+                        current_action = None  # Reset for next action
 
                 elif event_type == "chunk":
                     # Agent is streaming final answer chunks
                     chunk = event.get("content", "")
                     assistant_content += chunk
-                    # Forward chunk to frontend
-                    await self.websocket.send_json({
-                        "type": "chunk",
-                        "content": chunk
-                    })
+                    chunks_since_commit += 1
+
+                    # Forward chunk to frontend if WebSocket connected
+                    try:
+                        await self.websocket.send_json({
+                            "type": "chunk",
+                            "content": chunk
+                        })
+                    except:
+                        print(f"[AGENT] WebSocket disconnected during chunk, continuing...")
+
+                    # Batched commit: only commit periodically
+                    assistant_message.content = assistant_content
+                    if chunks_since_commit >= CHUNK_COMMIT_INTERVAL:
+                        await self.db.commit()
+                        chunks_since_commit = 0
+                        print(f"[AGENT] Committed content update ({len(assistant_content)} chars)")
 
                 elif event_type == "final_answer":
                     # Agent has completed the task (legacy - now using chunks)
                     answer = event.get("content", "")
                     assistant_content += answer
+                    chunks_since_commit += 1
                     print(f"[AGENT] Final Answer: {answer[:100]}...")
-                    await self.websocket.send_json({
-                        "type": "chunk",
-                        "content": answer
-                    })
+
+                    try:
+                        await self.websocket.send_json({
+                            "type": "chunk",
+                            "content": answer
+                        })
+                    except:
+                        print(f"[AGENT] WebSocket disconnected during final_answer, continuing...")
+
+                    # Batched commit: only commit periodically
+                    assistant_message.content = assistant_content
+                    if chunks_since_commit >= CHUNK_COMMIT_INTERVAL:
+                        await self.db.commit()
+                        chunks_since_commit = 0
+                        print(f"[AGENT] Committed content update ({len(assistant_content)} chars)")
 
                 elif event_type == "error":
                     # Error occurred
                     error_message = event.get("content", "Unknown error")
                     has_error = True
                     print(f"[AGENT] ERROR: {error_message}")
-                    await self.websocket.send_json({
-                        "type": "error",
-                        "content": error_message
-                    })
-                    # Break out of the loop - don't save message for errors
+
+                    try:
+                        await self.websocket.send_json({
+                            "type": "error",
+                            "content": error_message
+                        })
+                    except:
+                        print(f"[AGENT] WebSocket disconnected during error, message saved in database")
+
                     break
 
         except asyncio.CancelledError:
             # Task was cancelled
             cancelled = True
             print(f"[AGENT] Task cancelled via CancelledError")
-            await self.websocket.send_json({
-                "type": "cancelled",
-                "content": "Response cancelled by user"
-            })
+            try:
+                await self.websocket.send_json({
+                    "type": "cancelled",
+                    "content": "Response cancelled by user"
+                })
+            except:
+                print(f"[AGENT] WebSocket disconnected, cannot send cancellation message")
         finally:
             self.cancel_event = None
 
         print(f"[AGENT] Agent execution completed. Total events: {event_count}")
         print(f"[AGENT] Assistant content length: {len(assistant_content)}")
-        print(f"[AGENT] Total actions: {len(agent_actions)}")
         print(f"[AGENT] Has error: {has_error}")
         print(f"[AGENT] Cancelled: {cancelled}")
 
-        # ALWAYS save assistant message and agent actions (even on error)
-        # This ensures the LLM has memory of what it tried and users can see what happened
-        if not cancelled:
-            # Save assistant message with agent actions
-            assistant_message = Message(
-                chat_session_id=session_id,
-                role=MessageRole.ASSISTANT,
-                content=assistant_content if assistant_content else "Task completed.",
-                message_metadata={
-                    "agent_mode": True,
-                    "tools_used": [a["action_type"] for a in agent_actions],
-                    "has_error": has_error
-                },
-            )
-            self.db.add(assistant_message)
-            await self.db.flush()  # Get the message ID
+        # Update final message state
+        assistant_message.content = assistant_content if assistant_content else "Task completed."
+        assistant_message.message_metadata = {
+            "agent_mode": True,
+            "streaming": False,  # No longer streaming
+            "has_error": has_error,
+            "cancelled": cancelled
+        }
+        await self.db.commit()
+        print(f"[AGENT] Final message saved with ID: {assistant_message.id}")
 
-            # Save all agent actions linked to the message (including failed ones)
-            for action_data in agent_actions:
-                action = AgentAction(
-                    message_id=assistant_message.id,
-                    action_type=action_data["action_type"],
-                    action_input=action_data["action_input"],
-                    action_output=action_data.get("action_output"),
-                    status=action_data.get("status", "pending")
-                )
-                self.db.add(action)
-
-            await self.db.commit()
-
-            # Send completion with message ID
+        # Send completion with message ID
+        try:
             await self.websocket.send_json({
                 "type": "end",
                 "message_id": assistant_message.id,
-                "has_error": has_error
+                "has_error": has_error,
+                "cancelled": cancelled
             })
-        else:
-            # Only skip save on cancellation
-            print(f"[AGENT] Skipping message save due to cancellation")
-            await self.websocket.send_json({
-                "type": "end",
-                "cancelled": True
-            })
+        except:
+            print(f"[AGENT] WebSocket disconnected, cannot send end message")
 
     async def _get_conversation_history(self, session_id: str) -> list[Dict[str, str]]:
         """Get conversation history for a session, including agent actions."""
