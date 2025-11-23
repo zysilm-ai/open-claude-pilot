@@ -319,12 +319,9 @@ export default function ChatSessionPage() {
                         {agentActions
                           // Filter to show clean streaming experience
                           .filter((action, idx, arr) => {
-                            // Hide action_streaming if we have action for the same tool
+                            // Always hide action_streaming - we don't need the "Preparing..." indicator
                             if (action.type === 'action_streaming') {
-                              const hasAction = arr.find(
-                                a => a.type === 'action' && a.tool === action.tool
-                              );
-                              return !hasAction; // Hide streaming indicator once action arrives
+                              return false;
                             }
 
                             // Hide action_args_chunk if we have action for the same tool
