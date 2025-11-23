@@ -592,12 +592,14 @@ class ChatWebSocketHandler:
                 for action in msg.agent_actions:
                     # Add function call representation
                     # This shows the LLM what tool was called with what arguments
+                    # Note: arguments must be JSON string, not dict (OpenAI requirement)
+                    args_str = json.dumps(action.action_input) if isinstance(action.action_input, dict) else action.action_input
                     history.append({
                         "role": "assistant",
                         "content": f"Using tool: {action.action_type}",
-                        "tool_call": {
+                        "function_call": {
                             "name": action.action_type,
-                            "arguments": action.action_input
+                            "arguments": args_str
                         }
                     })
 

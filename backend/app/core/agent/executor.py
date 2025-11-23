@@ -202,6 +202,17 @@ Available tools will be provided as function calling options. Use them to accomp
                 if function_name and self.tools.has_tool(function_name):
                     print(f"[REACT AGENT] Executing function: {function_name}")
 
+                    # Add assistant's function call to conversation for proper context
+                    # This is critical so the LLM remembers what it decided to do in previous iterations
+                    messages.append({
+                        "role": "assistant",
+                        "content": full_response or None,
+                        "function_call": {
+                            "name": function_name,
+                            "arguments": function_args if isinstance(function_args, str) else json.dumps(function_args)
+                        }
+                    })
+
                     # Note: reasoning text before function call was already emitted as chunks during streaming
 
                     # Parse function arguments
