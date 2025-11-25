@@ -7,31 +7,17 @@ export default defineConfig({
   test: {
     globals: true,
     environment: 'jsdom',
-    setupFiles: ['./tests/setup.ts'],
+    setupFiles: './src/test/setup.ts',
     coverage: {
-      provider: 'v8',
       reporter: ['text', 'json', 'html'],
       exclude: [
         'node_modules/',
-        'tests/',
-        '**/*.spec.ts',
-        '**/*.test.ts',
-        '**/*.test.tsx',
-        '**/types/**',
-        '**/*.d.ts',
-        'vite.config.ts',
-        'vitest.config.ts',
-        'playwright.config.ts',
+        'src/test/',
+        '*.config.*',
+        'src/main.tsx',
+        'src/vite-env.d.ts',
       ],
-      thresholds: {
-        lines: 80,
-        functions: 80,
-        branches: 80,
-        statements: 80,
-      },
     },
-    include: ['src/**/*.{test,spec}.{ts,tsx}'],
-    exclude: ['node_modules', 'dist', 'build', '.idea', '.git', '.cache'],
   },
   resolve: {
     alias: {

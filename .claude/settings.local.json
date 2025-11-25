@@ -68,7 +68,8 @@
       "Bash(xargs:*)",
       "Bash(tree:*)",
       "Bash(npm run test:unit:*)",
-      "Bash(npx vitest:*)"
+      "Bash(npx vitest:*)",
+      "Bash(npm run test:e2e:*)"
     ],
     "deny": [],
     "ask": []

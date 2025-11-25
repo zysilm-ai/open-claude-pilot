@@ -63,12 +63,12 @@ export default defineConfig({
     {
       command: 'npm run dev',
       url: 'http://localhost:5173',
-      reuseExistingServer: !process.env.CI,
+      reuseExistingServer: true, // Always reuse existing server
     },
     {
       command: 'cd ../backend && poetry run python -m app.main',
       url: 'http://localhost:8000/api/v1/health',
-      reuseExistingServer: !process.env.CI,
+      reuseExistingServer: true, // Always reuse existing server
     },
   ],
 });
