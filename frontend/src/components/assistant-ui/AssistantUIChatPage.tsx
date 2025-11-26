@@ -21,7 +21,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { chatSessionsAPI, messagesAPI } from '@/services/api';
 import { useOptimizedStreaming } from '../ProjectSession/hooks/useOptimizedStreaming';
-import { VirtualizedChatList } from '../ProjectSession/components/VirtualizedChatList';
+import { AssistantUIChatList } from './AssistantUIChatList';
 import '../ProjectSession/ChatSessionPage.css';
 
 /**
@@ -120,9 +120,9 @@ export default function AssistantUIChatPage() {
         <div className="header-spacer"></div>
       </div>
 
-      {/* Messages - Using existing virtualized component */}
+      {/* Messages - Using assistant-ui chat list */}
       <div className="chat-messages-container">
-        <VirtualizedChatList
+        <AssistantUIChatList
           messages={messages}
           isStreaming={isStreaming}
           streamEvents={streamEvents}
