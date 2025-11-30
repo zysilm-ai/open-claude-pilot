@@ -1,5 +1,4 @@
 import { create } from 'zustand';
-import type { ChatSession, Message } from '@/types';
 
 export type StreamEventType = 'chunk' | 'thought' | 'action' | 'action_streaming' | 'action_args_chunk' | 'observation';
 

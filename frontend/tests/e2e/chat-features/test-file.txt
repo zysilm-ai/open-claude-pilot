@@ -1,3 +1,0 @@
-This is a test file for Playwright file upload tests.
-It contains some sample content.
-Multiple lines to test file handling.
