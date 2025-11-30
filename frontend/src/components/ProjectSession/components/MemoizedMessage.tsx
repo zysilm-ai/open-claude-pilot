@@ -1,15 +1,12 @@
 import { memo } from 'react';
 import { Streamdown } from 'streamdown';
-import { StreamEvent } from '../hooks/useOptimizedStreaming';
+import {StreamEvent} from "@/types";
 import {
-  CodeBlock,
   FileWriteActionArgs,
   formatActionArgs,
   ObservationContent,
   MessageContentWithImages
 } from './MessageHelpers';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
 
 interface Message {
   id: string;

@@ -1,13 +1,10 @@
 import React from 'react';
-import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
-import { oneLight } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import {
   FileWriteActionArgs,
   ObservationContent,
   formatActionArgs,
 } from './MessageHelpers';
-import type { AgentAction } from '../../../types';
-import type { StreamEvent } from '../../../stores/chatStore';
+import {AgentAction, StreamEvent} from "@/types";
 
 interface AgentActionDisplayProps {
   actions?: AgentAction[];

@@ -1,6 +1,5 @@
 import { useEffect, useRef } from 'react';
-import type { Message } from '@/types';
-import type { AgentAction, StreamEvent } from '@/stores/chatStore';
+import type {AgentAction, Message, StreamEvent} from '@/types';
 import './MessageList.css';
 
 interface MessageListProps {
@@ -87,8 +86,8 @@ export default function MessageList({
           </div>
         );
 
-      case 'thought':
-        return event.content;
+      //case 'thought':
+      //  return event.content;
 
       default:
         return null;

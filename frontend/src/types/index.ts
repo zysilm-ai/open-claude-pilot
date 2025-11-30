@@ -97,3 +97,13 @@ export interface StreamEvent {
     status?: string;
     metadata?: any;
 }
+
+export interface AgentAction {
+    type: 'thought' | 'action' | 'action_streaming' | 'observation';
+    content: string;
+    tool?: string;
+    args?: any;
+    success?: boolean;
+    status?: string;
+    step?: number;
+}
