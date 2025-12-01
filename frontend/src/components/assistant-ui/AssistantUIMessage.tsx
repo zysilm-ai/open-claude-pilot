@@ -12,8 +12,9 @@ import remarkGfm from 'remark-gfm';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { oneLight } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import { DefaultToolFallback } from './DefaultToolFallback';
+import { Message, StreamEvent } from '@/types';
 
-import type { ToolCallMessagePartProps, ToolCallMessagePartStatus } from '@assistant-ui/react';
+import type { ToolCallMessagePartStatus } from '@assistant-ui/react';
 
 interface AssistantUIMessageProps {
   message: Message;
@@ -33,7 +34,10 @@ export const AssistantUIMessage: React.FC<AssistantUIMessageProps> = ({
 
     // Handle streaming events with proper chunking
     if (isStreaming && streamEvents.length > 0) {
-      const toolCallsMap = new Map<string, ToolCallMessagePartProps>();
+      // Use an array to maintain order instead of Map
+      const toolCalls: Array<any> = [];
+      const toolCallsMap = new Map<string, any>();
+      let toolCallOrder = 0;
 
       streamEvents.forEach((event: StreamEvent) => {
         if (event.type === 'chunk') {
@@ -53,17 +57,23 @@ export const AssistantUIMessage: React.FC<AssistantUIMessageProps> = ({
               status: { type: 'running' } as ToolCallMessagePartStatus,
               addResult: () => {},
               resume: () => {},
+              order: toolCallOrder++,
             };
             toolCallsMap.set(toolId, toolCall);
-          }
-
-          // Update partial args
-          if (event.partial_args) {
-            toolCall.args = event.partial_args;
-            toolCall.argsText = JSON.stringify(event.partial_args, null, 2);
-          } else if (event.content) {
-            // Raw string content for args
-            toolCall.argsText = event.content;
+            toolCalls.push(toolCall);
+          } else {
+            // Update partial args - create new object
+            const updatedToolCall = {
+              ...toolCall,
+              args: event.partial_args || toolCall.args,
+              argsText: event.partial_args ? JSON.stringify(event.partial_args, null, 2) :
+                       event.content || toolCall.argsText,
+            };
+            toolCallsMap.set(toolId, updatedToolCall);
+            const index = toolCalls.findIndex(tc => tc.toolCallId === toolId);
+            if (index !== -1) {
+              toolCalls[index] = updatedToolCall;
+            }
           }
         } else if (event.type === 'action') {
           // Complete tool call with full arguments
@@ -79,12 +89,22 @@ export const AssistantUIMessage: React.FC<AssistantUIMessageProps> = ({
               status: { type: 'running' } as ToolCallMessagePartStatus,
               addResult: () => {},
               resume: () => {},
+              order: toolCallOrder++,
             };
             toolCallsMap.set(toolId, toolCall);
+            toolCalls.push(toolCall);
           } else {
-            // Update with complete args
-            toolCall.args = event.args || {};
-            toolCall.argsText = JSON.stringify(event.args || {}, null, 2);
+            // Update with complete args - create new object
+            const updatedToolCall = {
+              ...toolCall,
+              args: event.args || {},
+              argsText: JSON.stringify(event.args || {}, null, 2),
+            };
+            toolCallsMap.set(toolId, updatedToolCall);
+            const index = toolCalls.findIndex(tc => tc.toolCallId === toolId);
+            if (index !== -1) {
+              toolCalls[index] = updatedToolCall;
+            }
           }
         } else if (event.type === 'observation') {
           // Tool result - find the corresponding tool call
@@ -94,9 +114,18 @@ export const AssistantUIMessage: React.FC<AssistantUIMessageProps> = ({
           if (lastToolId) {
             const toolCall = toolCallsMap.get(lastToolId);
             if (toolCall) {
-              toolCall.result = event.content;
-              toolCall.isError = !event.success;
-              toolCall.status = { type: 'complete' };
+              // Update with result - create new object
+              const updatedToolCall = {
+                ...toolCall,
+                result: event.content,
+                isError: !event.success,
+                status: { type: 'complete' },
+              };
+              toolCallsMap.set(lastToolId, updatedToolCall);
+              const index = toolCalls.findIndex(tc => tc.toolCallId === lastToolId);
+              if (index !== -1) {
+                toolCalls[index] = updatedToolCall;
+              }
             }
           }
         }
@@ -107,10 +136,13 @@ export const AssistantUIMessage: React.FC<AssistantUIMessageProps> = ({
         parts.push({ type: 'text', content: currentText, isStreaming: true });
       }
 
-      // Add tool calls
-      toolCallsMap.forEach(toolCall => {
-        parts.push({ type: 'tool-call', ...toolCall });
-      });
+      // Add tool calls sorted by their order of appearance
+      toolCalls
+        .sort((a, b) => a.order - b.order)
+        .forEach(toolCall => {
+          const { order, ...rest } = toolCall;
+          parts.push({ type: 'tool-call', ...rest });
+        });
     } else {
       // Non-streaming message
       if (message.content) {
@@ -170,13 +202,14 @@ export const AssistantUIMessage: React.FC<AssistantUIMessageProps> = ({
             key={index}
             remarkPlugins={[remarkGfm]}
             components={{
-              code({ inline, className, children, ...props }) {
+              code({ className, children, ...props }: any) {
                 const match = /language-(\w+)/.exec(className || '');
                 const language = match ? match[1] : '';
+                const isInline = !props.node || props.node.position?.start.line === props.node.position?.end.line;
 
-                return !inline && language ? (
+                return !isInline && language ? (
                   <SyntaxHighlighter
-                    style={oneLight}
+                    style={oneLight as any}
                     language={language}
                     PreTag="div"
                     customStyle={{
@@ -185,7 +218,6 @@ export const AssistantUIMessage: React.FC<AssistantUIMessageProps> = ({
                       border: '1px solid #e5e7eb',
                       fontSize: '13px',
                     }}
-                    {...props}
                   >
                     {String(children).replace(/\n$/, '')}
                   </SyntaxHighlighter>
