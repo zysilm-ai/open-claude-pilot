@@ -240,6 +240,17 @@ export const useOptimizedStreaming = ({ sessionId, initialMessages = [] }: UseOp
         queryClient.invalidateQueries({ queryKey: ['chatSession', sessionId] });
         break;
 
+      case 'heartbeat':
+        // Heartbeat message to keep connection alive - silently ignore
+        break;
+
+      case 'resuming_stream':
+        // Indicates we're reconnecting to an existing stream
+        console.log('[STREAM RESUME] Reconnecting to existing stream:', data.message_id);
+        setIsStreaming(true);
+        // The backend will send buffered chunks after this message
+        break;
+
       default:
         console.warn('Unknown WebSocket message type:', data.type);
     }

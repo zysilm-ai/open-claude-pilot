@@ -1014,9 +1014,12 @@ Respond with ONLY the title, nothing else. The title should capture the main top
         # Send buffered chunks if available
         if session_id in _chunk_buffers:
             buffer = _chunk_buffers[session_id]
-            print(f"[TASK REGISTRY] Sending {len(buffer)} buffered chunks")
+            # Create a snapshot of the buffer to avoid "deque mutated during iteration" error
+            # The streaming task might still be adding chunks while we're iterating
+            buffer_snapshot = list(buffer)
+            print(f"[TASK REGISTRY] Sending {len(buffer_snapshot)} buffered chunks")
 
-            for chunk in buffer:
+            for chunk in buffer_snapshot:
                 try:
                     await self.websocket.send_json(chunk)
                     await asyncio.sleep(0.001)  # Small delay to avoid overwhelming client
