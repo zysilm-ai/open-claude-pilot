@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import settings
 from app.core.storage.database import init_db, close_db
-from app.api.routes import projects, chat, sandbox, files, settings as settings_routes, test_streaming
+from app.api.routes import projects, chat, sandbox, files, settings as settings_routes
 from app.api.websocket.streaming_manager import streaming_manager
 
 # Import all models to register them with SQLAlchemy Base before init_db
