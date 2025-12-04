@@ -13,6 +13,7 @@ from app.core.agent.executor import ReActAgent
 from app.core.agent.tools import ToolRegistry, BashTool, FileReadTool, FileWriteTool, FileEditTool, SearchTool, SetupEnvironmentTool
 from app.core.sandbox.manager import get_container_manager
 from app.api.websocket.task_registry import get_agent_task_registry
+from app.api.websocket.streaming_manager import streaming_manager
 from collections import deque
 
 # Import new architectural services
@@ -233,12 +234,19 @@ class ChatWebSocketHandler:
 
         except WebSocketDisconnect:
             print(f"WebSocket disconnected for session {session_id}")
+            # Ensure streaming manager handles any pending finalization
+            await streaming_manager.handle_disconnect(session_id)
         except Exception as e:
             print(f"WebSocket error: {str(e)}")
-            await self.websocket.send_json({
-                "type": "error",
-                "content": f"Error: {str(e)}"
-            })
+            # Ensure streaming manager handles any pending finalization
+            await streaming_manager.handle_disconnect(session_id)
+            try:
+                await self.websocket.send_json({
+                    "type": "error",
+                    "content": f"Error: {str(e)}"
+                })
+            except:
+                pass  # WebSocket might already be closed
         finally:
             try:
                 await self.websocket.close()
@@ -382,12 +390,44 @@ class ChatWebSocketHandler:
         self.cancel_event = asyncio.Event()
 
         # Stream response
-        assistant_content = ""
-        cancelled = False
+        # Use a mutable container to ensure the finalization callback gets the latest content
+        content_holder = {"content": "", "cancelled": False}
 
         # Batching for performance: only commit every N chunks
         chunks_since_commit = 0
         CHUNK_COMMIT_INTERVAL = 50  # Commit every 50 chunks
+
+        # Create finalization callback for StreamingManager
+        async def finalize_message():
+            """Ensure message is properly finalized even if WebSocket disconnects"""
+            try:
+                print(f"[FINALIZATION] Running finalization for message {assistant_message.id}")
+                # Fetch the message again to ensure we have latest state
+                result = await self.db.execute(
+                    select(Message).where(Message.id == assistant_message.id)
+                )
+                msg = result.scalar_one_or_none()
+
+                if msg:
+                    # Use the content from the mutable container (gets latest value)
+                    msg.content = content_holder["content"]
+                    msg.message_metadata = {
+                        "streaming": False,  # Critical: mark as complete
+                        "cancelled": content_holder["cancelled"]
+                    }
+                    await self.db.commit()
+                    print(f"[FINALIZATION] Message {msg.id} finalized with {len(content_holder['content'])} chars")
+            except Exception as e:
+                print(f"[FINALIZATION] Error finalizing message: {e}")
+                import traceback
+                traceback.print_exc()
+
+        # Register with streaming manager
+        await streaming_manager.register_stream(
+            session_id=session_id,
+            message_id=assistant_message.id,
+            cleanup_callback=finalize_message
+        )
 
         try:
             await self.websocket.send_json({"type": "start"})
@@ -399,7 +439,7 @@ class ChatWebSocketHandler:
                 # Check for cancellation
                 if self.cancel_event.is_set():
                     print(f"[SIMPLE RESPONSE] Cancellation detected")
-                    cancelled = True
+                    content_holder["cancelled"] = True
                     try:
                         await self.websocket.send_json({
                             "type": "cancelled",
@@ -410,8 +450,11 @@ class ChatWebSocketHandler:
                     break
 
                 if isinstance(chunk, str):
-                    assistant_content += chunk
+                    content_holder["content"] += chunk
                     chunks_since_commit += 1
+
+                    # Update streaming manager activity
+                    await streaming_manager.update_activity(session_id, len(content_holder["content"]))
 
                     # Buffer chunk for reconnection support
                     chunk_data = {
@@ -429,15 +472,15 @@ class ChatWebSocketHandler:
                         print(f"[SIMPLE RESPONSE] WebSocket disconnected during chunk, continuing...")
 
                     # BATCHED INCREMENTAL SAVE: Update message content, commit periodically
-                    assistant_message.content = assistant_content
+                    assistant_message.content = content_holder["content"]
                     if chunks_since_commit >= CHUNK_COMMIT_INTERVAL:
                         await self.db.commit()
                         chunks_since_commit = 0
-                        print(f"[SIMPLE RESPONSE] Committed content update ({len(assistant_content)} chars)")
+                        print(f"[SIMPLE RESPONSE] Committed content update ({len(content_holder['content'])} chars)")
 
         except asyncio.CancelledError:
             print(f"[SIMPLE RESPONSE] Task cancelled")
-            cancelled = True
+            content_holder["cancelled"] = True
             try:
                 await self.websocket.send_json({
                     "type": "cancelled",
@@ -449,26 +492,29 @@ class ChatWebSocketHandler:
             self.cancel_event = None
 
         # Update final message state - ALWAYS use the complete accumulated content
-        assistant_message.content = assistant_content  # No conditional - always assign the full content
+        assistant_message.content = content_holder["content"]  # No conditional - always assign the full content
         assistant_message.message_metadata = {
             "streaming": False,
-            "cancelled": cancelled
+            "cancelled": content_holder["cancelled"]
         }
         await self.db.commit()
-        print(f"[SIMPLE RESPONSE] Final message saved with ID: {assistant_message.id}, Content length: {len(assistant_content)} chars")
+        print(f"[SIMPLE RESPONSE] Final message saved with ID: {assistant_message.id}, Content length: {len(content_holder['content'])} chars")
+
+        # Mark as finalized in streaming manager
+        await streaming_manager.mark_finalized(session_id)
 
         # Send completion
         try:
             await self.websocket.send_json({
                 "type": "end",
                 "message_id": assistant_message.id,
-                "cancelled": cancelled
+                "cancelled": content_holder["cancelled"]
             })
         except:
             print(f"[SIMPLE RESPONSE] WebSocket disconnected, cannot send end message")
 
         # Mark task as completed in registry
-        await self.task_registry.mark_completed(session_id, 'completed' if not cancelled else 'cancelled')
+        await self.task_registry.mark_completed(session_id, 'completed' if not content_holder["cancelled"] else 'cancelled')
 
         # Clear chunk buffer for this session
         if session_id in _chunk_buffers:
@@ -625,6 +671,40 @@ class ChatWebSocketHandler:
         # Batching for performance: only commit every N chunks or when action completes
         chunks_since_commit = 0
         CHUNK_COMMIT_INTERVAL = 50  # Commit every 50 chunks
+
+        # Create finalization callback for StreamingManager
+        async def finalize_agent_message():
+            """Ensure agent message is properly finalized even if WebSocket disconnects"""
+            try:
+                print(f"[FINALIZATION] Running finalization for agent message {assistant_message.id}")
+                # Fetch the message again to ensure we have latest state
+                result = await self.db.execute(
+                    select(Message).where(Message.id == assistant_message.id)
+                )
+                msg = result.scalar_one_or_none()
+
+                if msg:
+                    # Use the assistant_content from the outer scope (captured at finalization time)
+                    msg.content = assistant_content
+                    msg.message_metadata = {
+                        "agent_mode": True,
+                        "streaming": False,  # Critical: mark as complete
+                        "has_error": has_error,
+                        "cancelled": cancelled
+                    }
+                    await self.db.commit()
+                    print(f"[FINALIZATION] Agent message {msg.id} finalized with {len(assistant_content)} chars")
+            except Exception as e:
+                print(f"[FINALIZATION] Error finalizing agent message: {e}")
+                import traceback
+                traceback.print_exc()
+
+        # Register with streaming manager
+        await streaming_manager.register_stream(
+            session_id=session_id,
+            message_id=assistant_message.id,
+            cleanup_callback=finalize_agent_message
+        )
 
         await self.websocket.send_json({"type": "start"})
         print(f"[AGENT] Starting agent execution loop...")
@@ -785,6 +865,9 @@ class ChatWebSocketHandler:
                     assistant_content += chunk
                     chunks_since_commit += 1
 
+                    # Update streaming manager activity
+                    await streaming_manager.update_activity(session_id, len(assistant_content))
+
                     # Buffer chunk for reconnection support
                     chunk_data = {
                         "type": "chunk",
@@ -875,6 +958,9 @@ class ChatWebSocketHandler:
         }
         await self.db.commit()
         print(f"[AGENT] Final message saved with ID: {assistant_message.id}, Content length: {len(assistant_content)} chars")
+
+        # Mark as finalized in streaming manager
+        await streaming_manager.mark_finalized(session_id)
 
         # Send completion with message ID
         try:

@@ -71,7 +71,9 @@
       "Bash(node test-streaming-monitor.js:*)",
       "Bash(node test-streaming-monitor.cjs:*)",
       "Bash(node test-streaming-simple.cjs:*)",
-      "Bash(node test-specific-session.cjs:*)"
+      "Bash(node test-specific-session.cjs:*)",
+      "Bash(node test-navigation-persistence.cjs:*)",
+      "Bash(node test-streaming-manager.cjs:*)"
     ],
     "deny": [],
     "ask": []
