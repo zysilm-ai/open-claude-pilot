@@ -18,10 +18,12 @@
  */
 import { useEffect, useCallback, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { chatSessionsAPI, contentBlocksAPI } from '@/services/api';
 import { useOptimizedStreaming } from '../ProjectSession/hooks/useOptimizedStreaming';
 import { AssistantUIChatList } from './AssistantUIChatList';
+import { ChatFileSidebar } from '../ChatFileSidebar';
+import { FolderOpen } from 'lucide-react';
 import '../ProjectSession/ChatSessionPage.css';
 
 /**
@@ -35,7 +37,9 @@ export default function AssistantUIChatPage() {
     sessionId: string;
   }>();
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const [input, setInput] = useState('');
+  const [sidebarOpen, setSidebarOpen] = useState(false);
 
   // Fetch session metadata
   const { data: session } = useQuery({
@@ -54,6 +58,12 @@ export default function AssistantUIChatPage() {
     refetchOnReconnect: false,
   });
 
+  // Callback for when workspace files change
+  const handleWorkspaceFilesChanged = useCallback(() => {
+    // Invalidate the workspace files query to trigger a refetch
+    queryClient.invalidateQueries({ queryKey: ['workspaceFiles', sessionId] });
+  }, [queryClient, sessionId]);
+
   // Use the optimized streaming hook with loaded content blocks
   const {
     blocks,
@@ -66,7 +76,13 @@ export default function AssistantUIChatPage() {
   } = useOptimizedStreaming({
     sessionId: sessionId!,
     initialBlocks: blocksData?.blocks || [],
+    onWorkspaceFilesChanged: handleWorkspaceFilesChanged,
   });
+
+  // Toggle sidebar
+  const toggleSidebar = useCallback(() => {
+    setSidebarOpen(prev => !prev);
+  }, []);
 
   // Handle pending message from sessionStorage (quick start feature)
   useEffect(() => {
@@ -116,68 +132,88 @@ export default function AssistantUIChatPage() {
             </span>
           )}
         </h2>
-        <div className="header-spacer"></div>
+        <button
+          onClick={toggleSidebar}
+          className={`files-toggle-btn ${sidebarOpen ? 'active' : ''}`}
+          aria-label="Toggle files sidebar"
+          title="Files"
+        >
+          <FolderOpen size={18} />
+        </button>
       </div>
 
-      {/* Content Blocks - Using assistant-ui chat list */}
-      <div className="chat-messages-container">
-        <AssistantUIChatList
-          blocks={blocks}
-          isStreaming={isStreaming}
-          streamEvents={streamEvents}
-        />
-      </div>
+      {/* Main content area with optional sidebar */}
+      <div className="chat-main-wrapper">
+        {/* Chat content column */}
+        <div className="chat-content-column">
+          {/* Content Blocks - Using assistant-ui chat list */}
+          <div className="chat-messages-container">
+            <AssistantUIChatList
+              blocks={blocks}
+              isStreaming={isStreaming}
+              streamEvents={streamEvents}
+            />
+          </div>
 
-      {/* Error Banner - Preserved from legacy */}
-      {error && (
-        <div className="chat-error-banner">
-          <div className="error-content">
-            <span className="error-icon">⚠️</span>
-            <div className="error-message">{error}</div>
-            <button
-              className="error-close-btn"
-              onClick={clearError}
-              aria-label="Close error"
-            >
-              ×
-            </button>
+          {/* Error Banner - Preserved from legacy */}
+          {error && (
+            <div className="chat-error-banner">
+              <div className="error-content">
+                <span className="error-icon">⚠️</span>
+                <div className="error-message">{error}</div>
+                <button
+                  className="error-close-btn"
+                  onClick={clearError}
+                  aria-label="Close error"
+                >
+                  ×
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Message Input - Preserved from legacy */}
+          <div className="chat-input-container">
+            <div className="chat-input-wrapper">
+              <textarea
+                className="chat-input"
+                placeholder="Type your message..."
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                onKeyPress={handleKeyPress}
+                rows={1}
+                disabled={isStreaming}
+              />
+              <button
+                className={`send-btn ${isStreaming ? 'stop-btn' : ''}`}
+                onClick={isStreaming ? cancelStream : handleSend}
+                disabled={isStreaming ? false : !input.trim()}
+                title={isStreaming ? 'Stop generating' : 'Send message'}
+              >
+                {isStreaming ? (
+                  'Stop'
+                ) : (
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+                    <path
+                      d="M22 2L11 13M22 2L15 22L11 13M22 2L2 9L11 13"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                  </svg>
+                )}
+              </button>
+            </div>
           </div>
         </div>
-      )}
 
-      {/* Message Input - Preserved from legacy */}
-      <div className="chat-input-container">
-        <div className="chat-input-wrapper">
-          <textarea
-            className="chat-input"
-            placeholder="Type your message..."
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyPress={handleKeyPress}
-            rows={1}
-            disabled={isStreaming}
-          />
-          <button
-            className={`send-btn ${isStreaming ? 'stop-btn' : ''}`}
-            onClick={isStreaming ? cancelStream : handleSend}
-            disabled={isStreaming ? false : !input.trim()}
-            title={isStreaming ? 'Stop generating' : 'Send message'}
-          >
-            {isStreaming ? (
-              'Stop'
-            ) : (
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
-                <path
-                  d="M22 2L11 13M22 2L15 22L11 13M22 2L2 9L11 13"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-              </svg>
-            )}
-          </button>
-        </div>
+        {/* File Sidebar */}
+        <ChatFileSidebar
+          sessionId={sessionId!}
+          isOpen={sidebarOpen}
+          onClose={() => setSidebarOpen(false)}
+        />
       </div>
     </div>
   );

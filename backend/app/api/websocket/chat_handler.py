@@ -968,6 +968,13 @@ class ChatWebSocketHandler:
                             "type": "tool_result_block",
                             "block": self._block_to_dict(tool_result_block)
                         })
+
+                        # Send workspace_files_changed event for file-modifying tools
+                        if tool_name_for_result in ("file_write", "edit", "bash") and success:
+                            await self.websocket.send_json({
+                                "type": "workspace_files_changed",
+                                "tool": tool_name_for_result,
+                            })
                     except:
                         print(f"[AGENT] WebSocket disconnected during observation, continuing...")
 

@@ -154,6 +154,57 @@ export const filesAPI = {
   },
 };
 
+// Workspace Files API (for chat session file sidebar)
+export interface WorkspaceFile {
+  name: string;
+  path: string;
+  size: number;
+  type: 'uploaded' | 'output';
+  mime_type: string | null;
+}
+
+export interface WorkspaceFilesResponse {
+  uploaded: WorkspaceFile[];
+  output: WorkspaceFile[];
+}
+
+export interface WorkspaceFileContent {
+  path: string;
+  content: string;
+  is_binary: boolean;
+  mime_type: string | null;
+}
+
+export const workspaceAPI = {
+  listFiles: async (sessionId: string): Promise<WorkspaceFilesResponse> => {
+    const { data } = await api.get<WorkspaceFilesResponse>(`/chats/${sessionId}/workspace/files`);
+    return data;
+  },
+
+  getFileContent: async (sessionId: string, path: string): Promise<WorkspaceFileContent> => {
+    const { data } = await api.get<WorkspaceFileContent>(`/chats/${sessionId}/workspace/files/content`, {
+      params: { path },
+    });
+    return data;
+  },
+
+  downloadFile: async (sessionId: string, path: string): Promise<Blob> => {
+    const { data } = await api.get(`/chats/${sessionId}/workspace/files/download`, {
+      params: { path },
+      responseType: 'blob',
+    });
+    return data;
+  },
+
+  downloadAll: async (sessionId: string, type: 'uploaded' | 'output'): Promise<Blob> => {
+    const { data } = await api.get(`/chats/${sessionId}/workspace/download-all`, {
+      params: { type },
+      responseType: 'blob',
+    });
+    return data;
+  },
+};
+
 // Sandbox API
 export const sandboxAPI = {
   start: async (sessionId: string): Promise<any> => {

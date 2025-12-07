@@ -8,6 +8,7 @@ const FLUSH_INTERVAL_MS = 30;
 interface UseOptimizedStreamingProps {
   sessionId: string;
   initialBlocks?: ContentBlock[];
+  onWorkspaceFilesChanged?: () => void;
 }
 
 interface UseOptimizedStreamingReturn {
@@ -30,7 +31,8 @@ interface BlockStreamState {
 
 export const useOptimizedStreaming = ({
   sessionId,
-  initialBlocks = []
+  initialBlocks = [],
+  onWorkspaceFilesChanged,
 }: UseOptimizedStreamingProps): UseOptimizedStreamingReturn => {
   const [blocks, setBlocks] = useState<ContentBlock[]>(initialBlocks);
   const [streamEvents, setStreamEvents] = useState<StreamEvent[]>([]);
@@ -519,6 +521,14 @@ export const useOptimizedStreaming = ({
         // Heartbeat message to keep connection alive
         break;
 
+      case 'workspace_files_changed':
+        // Workspace files have been modified by a tool
+        console.log('[WS] workspace_files_changed:', data.tool);
+        if (onWorkspaceFilesChanged) {
+          onWorkspaceFilesChanged();
+        }
+        break;
+
       case 'resuming_stream':
         // Legacy reconnection event (fallback when stream_sync not available)
         console.log('[WS] resuming_stream (legacy):', data.message_id);
@@ -612,7 +622,7 @@ export const useOptimizedStreaming = ({
       default:
         console.warn('Unknown WebSocket message type:', data.type);
     }
-  }, [sessionId, queryClient]);
+  }, [sessionId, queryClient, onWorkspaceFilesChanged]);
 
   // WebSocket connection setup
   useEffect(() => {

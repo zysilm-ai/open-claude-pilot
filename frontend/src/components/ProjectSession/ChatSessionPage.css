@@ -5,6 +5,22 @@
   background: #ffffff;
 }
 
+/* Main wrapper for content + sidebar layout */
+.chat-main-wrapper {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* Chat content column (messages + input) */
+.chat-content-column {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+}
+
 /* Header */
 .chat-header {
   display: flex;
@@ -56,6 +72,33 @@
 
 .header-spacer {
   width: 100px;
+}
+
+/* Files toggle button */
+.files-toggle-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  background: #f9fafb;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  color: #6b7280;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.files-toggle-btn:hover {
+  background: #f3f4f6;
+  border-color: #d1d5db;
+  color: #374151;
+}
+
+.files-toggle-btn.active {
+  background: #eff6ff;
+  border-color: #2563eb;
+  color: #2563eb;
 }
 
 /* Messages Container */
