@@ -15,7 +15,7 @@ from app.models.database import (
 from sqlalchemy import func
 from app.core.llm import create_llm_provider_with_db
 from app.core.agent.executor import ReActAgent
-from app.core.agent.tools import ToolRegistry, BashTool, FileReadTool, FileWriteTool, FileEditTool, SearchTool, SetupEnvironmentTool
+from app.core.agent.tools import ToolRegistry, BashTool, FileReadTool, FileWriteTool, FileEditTool, SearchTool, SetupEnvironmentTool, ThinkTool
 from app.core.sandbox.manager import get_container_manager
 from app.api.websocket.task_registry import get_agent_task_registry
 from app.api.websocket.streaming_manager import streaming_manager
@@ -710,6 +710,10 @@ class ChatWebSocketHandler:
             # Environment not set up - only register setup_environment tool
             tool_registry.register(SetupEnvironmentTool(self.db, session_id, container_manager))
 
+        # Always register ThinkTool - it doesn't require a container
+        # This enables chain-of-thought reasoning for complex tasks
+        tool_registry.register(ThinkTool())
+
         # Create ReAct agent
         agent = ReActAgent(
             llm_provider=llm_provider,
@@ -985,6 +989,10 @@ class ChatWebSocketHandler:
                             if "search" in agent_config.enabled_tools:
                                 tool_registry.register(SearchTool(container))
                                 print(f"[AGENT]   ✓ Registered SearchTool")
+
+                            # Always re-register ThinkTool
+                            tool_registry.register(ThinkTool())
+                            print(f"[AGENT]   ✓ Registered ThinkTool")
 
                             print(f"[AGENT] Tool registry updated! Now has {len(tool_registry._tools)} tools")
                         else:
