@@ -323,6 +323,16 @@ export const useOptimizedStreaming = ({
         }
         break;
 
+      case 'tool_completed':
+        // Tool completed - refetch blocks to get the new tool_call and tool_result blocks
+        console.log('[WS] tool_completed:', data.tool);
+        // Refetch blocks from API to get the completed tool blocks
+        queryClient.refetchQueries({
+          queryKey: ['contentBlocks', sessionId],
+          exact: true
+        });
+        break;
+
       case 'assistant_text_end':
         // Assistant finished streaming
         console.log('[WS] assistant_text_end:', data.block_id);

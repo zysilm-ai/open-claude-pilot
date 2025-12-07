@@ -1392,10 +1392,15 @@ Respond with ONLY the title, nothing else. The title should capture the main top
                         ws_connected = False
                         break
 
-        # Track content length for detecting new chunks
-        last_content_length = len(_stream_states.get(session_id, StreamState("", session_id)).accumulated_content)
+        # Track content length and tool state for detecting changes
+        initial_state = _stream_states.get(session_id, StreamState("", session_id))
+        last_content_length = len(initial_state.accumulated_content)
+        last_tool_args = initial_state.active_tool_call.partial_args if initial_state.active_tool_call else None
+        last_tool_status = initial_state.active_tool_call.status if initial_state.active_tool_call else None
+        last_tool_name = initial_state.active_tool_call.tool_name if initial_state.active_tool_call else None
+        tool_was_active = initial_state.active_tool_call is not None
 
-        # Keep WebSocket open and forward new chunks as they arrive
+        # Keep WebSocket open and forward new chunks/tool events as they arrive
         while ws_connected and existing_task.status == 'running' and not existing_task.task.done():
             try:
                 # Check for new content in stream state
@@ -1418,6 +1423,69 @@ Respond with ONLY the title, nothing else. The title should capture the main top
                                 print(f"[STREAM SYNC] WebSocket disconnected while forwarding chunk: {e}")
                                 ws_connected = False
                                 break
+
+                    # Check for tool call state changes
+                    current_tool = current_state.active_tool_call
+                    if current_tool:
+                        # Tool is active - check for updates
+                        if current_tool.partial_args != last_tool_args:
+                            # Args changed - send action_args_chunk
+                            try:
+                                await self.websocket.send_json({
+                                    "type": "action_args_chunk",
+                                    "tool": current_tool.tool_name,
+                                    "partial_args": current_tool.partial_args,
+                                    "step": current_tool.step
+                                })
+                                last_tool_args = current_tool.partial_args
+                            except (WebSocketDisconnect, ConnectionError, Exception) as e:
+                                print(f"[STREAM SYNC] WebSocket disconnected while forwarding tool args: {e}")
+                                ws_connected = False
+                                break
+
+                        if current_tool.status != last_tool_status:
+                            # Status changed
+                            if current_tool.status == "running" and last_tool_status == "streaming":
+                                # Tool args complete, now running - send action event
+                                try:
+                                    args = {}
+                                    if current_tool.partial_args:
+                                        try:
+                                            args = json.loads(current_tool.partial_args)
+                                        except:
+                                            pass
+                                    await self.websocket.send_json({
+                                        "type": "action",
+                                        "tool": current_tool.tool_name,
+                                        "args": args,
+                                        "step": current_tool.step
+                                    })
+                                except (WebSocketDisconnect, ConnectionError, Exception) as e:
+                                    print(f"[STREAM SYNC] WebSocket disconnected while forwarding action: {e}")
+                                    ws_connected = False
+                                    break
+                            last_tool_status = current_tool.status
+
+                        last_tool_name = current_tool.tool_name
+                        tool_was_active = True
+
+                    elif tool_was_active:
+                        # Tool was active but now cleared - tool completed
+                        # Trigger a refetch on the frontend by sending a hint
+                        print(f"[STREAM SYNC] Tool completed, notifying frontend to refetch blocks")
+                        try:
+                            await self.websocket.send_json({
+                                "type": "tool_completed",
+                                "tool": last_tool_name
+                            })
+                        except (WebSocketDisconnect, ConnectionError, Exception) as e:
+                            print(f"[STREAM SYNC] WebSocket disconnected while sending tool_completed: {e}")
+                            ws_connected = False
+                            break
+                        tool_was_active = False
+                        last_tool_args = None
+                        last_tool_status = None
+                        last_tool_name = None
 
                 await asyncio.sleep(0.03)  # Check for new content every 30ms
 
