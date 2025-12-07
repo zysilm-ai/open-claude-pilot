@@ -26,9 +26,10 @@ interface AgentConfig {
 
 const AVAILABLE_TOOLS = [
   { id: 'bash', name: 'Bash', description: 'Execute shell commands' },
-  { id: 'file_read', name: 'File Read', description: 'Read file contents' },
+  { id: 'file_read', name: 'File Read', description: 'Read file contents with line numbers' },
   { id: 'file_write', name: 'File Write', description: 'Create/overwrite files' },
-  { id: 'edit', name: 'Edit', description: 'Smart editing - AST-aware for code, text-based for config files' },
+  { id: 'edit', name: 'Edit (Pattern)', description: 'Pattern-based editing - AST-aware for code refactoring' },
+  { id: 'edit_lines', name: 'Edit (Lines)', description: 'Line-based editing - auto-indent, syntax validation, no whitespace issues' },
   { id: 'search', name: 'Search', description: 'Universal search - code structures, text content, and filenames' },
   { id: 'think', name: 'Think', description: 'Chain-of-thought reasoning for complex tasks' },
 ];

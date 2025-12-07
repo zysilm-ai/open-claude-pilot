@@ -115,7 +115,7 @@ class FileReadTool(Tool):
             "USE THIS TOOL WHEN USER ASKS TO: visualize, show, display, view, see, render, preview, or look at ANY file. "
             "Can read from: /workspace/project_files (user uploaded files) or /workspace/out (files created by you). "
             "UNIVERSAL FILE SUPPORT: "
-            "• Text files → returns content as string for viewing "
+            "• Text files → returns content WITH LINE NUMBERS for easy reference "
             "• Images (PNG, JPG, SVG, GIF, etc.) → returns data URI for automatic display "
             "• Documents (PDF, HTML, etc.) → returns data URI for rendering "
             "• Media (audio, video) → returns data URI for playback (if supported) "
@@ -124,7 +124,8 @@ class FileReadTool(Tool):
             "The frontend automatically renders supported formats - just read the file! "
             "Examples: '/workspace/out/plot.png', '/workspace/out/diagram.svg', '/workspace/project_files/image.jpg'. "
             "CRITICAL: When user says 'visualize', 'show me', or 'display' → ALWAYS use this tool to make content visible. "
-            "After generating ANY visual output (charts, plots, diagrams, images), ALWAYS read it to display to user."
+            "After generating ANY visual output (charts, plots, diagrams, images), ALWAYS read it to display to user. "
+            "NOTE: Line numbers in output are essential for using edit_lines tool."
         )
 
     @property
@@ -205,7 +206,14 @@ class FileReadTool(Tool):
                 metadata["filename"] = filename
                 metadata["mime_type"] = mime_type
             else:
-                output_msg = content
+                # Format text content with line numbers for easy reference
+                # This is essential for using edit_lines tool
+                lines = content.split('\n')
+                formatted_lines = []
+                for i, line in enumerate(lines, 1):
+                    formatted_lines.append(f"{i:>4}: {line}")
+                output_msg = '\n'.join(formatted_lines)
+                metadata["line_count"] = len(lines)
 
             return ToolResult(
                 success=True,
