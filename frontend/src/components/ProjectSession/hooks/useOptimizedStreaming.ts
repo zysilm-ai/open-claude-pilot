@@ -81,6 +81,10 @@ export const useOptimizedStreaming = ({
       // Flush stream events
       if (eventBufferRef.current.length > 0) {
         const eventsToFlush = [...eventBufferRef.current];
+        console.log('[useOptimizedStreaming] Flushing events:', {
+          count: eventsToFlush.length,
+          types: eventsToFlush.map(e => e.type)
+        });
         setStreamEvents(prev => [...prev, ...eventsToFlush]);
         eventBufferRef.current = [];
       }

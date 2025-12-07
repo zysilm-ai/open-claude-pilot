@@ -2,8 +2,7 @@
  * AssistantUIMessage - Message component with ContentBlock support
  *
  * This component renders ContentBlocks with proper streaming and tool call handling.
- * It receives a main block (user_text or assistant_text) and optional tool blocks
- * (tool_call and tool_result) that are associated with this message.
+ * Uses sequence_number from blocks for ordering, overlays streaming state on top.
  */
 
 import React, { useMemo } from 'react';
@@ -16,16 +15,13 @@ import { ContentBlock, StreamEvent } from '@/types';
 
 import type { ToolCallMessagePartStatus } from '@assistant-ui/react';
 
-// Simple streaming text component that doesn't use dynamic imports
+// Simple streaming text component
 const StreamingText: React.FC<{ content: string }> = ({ content }) => {
-  // Simple markdown parsing without code highlighting during streaming
   const renderContent = () => {
-    // Split by code blocks
     const parts = content.split(/(```[\s\S]*?```)/g);
 
     return parts.map((part, index) => {
       if (part.startsWith('```') && part.endsWith('```')) {
-        // Extract code content
         const codeContent = part.slice(3, -3);
         const firstNewline = codeContent.indexOf('\n');
         const language = firstNewline > 0 ? codeContent.slice(0, firstNewline) : '';
@@ -45,7 +41,6 @@ const StreamingText: React.FC<{ content: string }> = ({ content }) => {
           </pre>
         );
       } else {
-        // Render regular text with basic markdown
         const formatted = part
           .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
           .replace(/\*(.*?)\*/g, '<em>$1</em>')
@@ -90,281 +85,184 @@ export const AssistantUIMessage: React.FC<AssistantUIMessageProps> = ({
   isStreaming = false,
   streamEvents = [],
 }) => {
-  // Determine role from block type
   const role = block.block_type === 'user_text' ? 'user' : 'assistant';
   const textContent = block.content?.text || '';
 
-  // Debug logging for tool blocks
-  if (toolBlocks.length > 0 || isStreaming) {
-    console.log('[AssistantUIMessage] Rendering:', {
-      blockId: block.id,
-      blockType: block.block_type,
-      textContentLength: textContent.length,
-      textContentPreview: textContent.substring(0, 100),
-      toolBlockCount: toolBlocks.length,
-      toolBlockTypes: toolBlocks.map(tb => tb.block_type),
-      isStreaming,
-      streamEventsCount: streamEvents.length
-    });
-  }
-
-  // Process message parts with proper streaming support
+  // Build message parts
   const messageParts = useMemo(() => {
     const parts: any[] = [];
 
-    // Handle streaming events with proper chunking
-    if (isStreaming && streamEvents.length > 0) {
-      // Accumulate text from streaming events
-      let streamingText = '';
-      const toolCalls: Array<any> = [];
-      const toolCallsMap = new Map<string, any>();
-      let toolCallOrder = 0;
+    // Step 1: Build streaming tool state from events (latest state for each tool)
+    const streamingState = new Map<string, {
+      toolName: string;
+      argsText: string;
+      args: any;
+      status: string;
+      result?: any;
+      isError?: boolean;
+      step: number;
+    }>();
 
-      streamEvents.forEach((event: StreamEvent) => {
+    let streamingText = '';
+
+    if (streamEvents.length > 0) {
+      // Process ALL events to get final state for each streaming tool
+      for (const event of streamEvents) {
         if (event.type === 'chunk') {
           streamingText += event.content || '';
         } else if (event.type === 'action_args_chunk') {
-          // Streaming tool arguments - partial_args is a raw JSON string
-          // Use step to differentiate multiple calls to the same tool
-          const toolId = `${event.tool}-stream-${event.step || 0}`;
-          let toolCall = toolCallsMap.get(toolId);
-
-          // partial_args is the accumulated JSON string so far
+          const key = `${event.tool}-${event.step || 0}`;
           const argsString = event.partial_args || event.content || '';
-
-          // Try to parse the partial args for display
           let parsedArgs = {};
           try {
-            if (argsString) {
-              parsedArgs = JSON.parse(argsString);
-            }
-          } catch {
-            // Incomplete JSON is expected during streaming
-          }
+            if (argsString) parsedArgs = JSON.parse(argsString);
+          } catch { /* Incomplete JSON */ }
 
-          if (!toolCall) {
-            toolCall = {
-              toolCallId: toolId,
-              toolName: event.tool || 'unknown',
-              args: parsedArgs,
-              argsText: argsString, // Show raw string as-is
-              status: { type: 'running' } as ToolCallMessagePartStatus,
-              addResult: () => {},
-              resume: () => {},
-              order: toolCallOrder++,
-            };
-            toolCallsMap.set(toolId, toolCall);
-            toolCalls.push(toolCall);
-          } else {
-            const updatedToolCall = {
-              ...toolCall,
-              args: parsedArgs,
-              argsText: argsString, // Show raw string as-is
-            };
-            toolCallsMap.set(toolId, updatedToolCall);
-            const index = toolCalls.findIndex(tc => tc.toolCallId === toolId);
-            if (index !== -1) {
-              toolCalls[index] = updatedToolCall;
-            }
-          }
+          streamingState.set(key, {
+            toolName: event.tool || 'unknown',
+            argsText: argsString,
+            args: parsedArgs,
+            status: 'streaming',
+            step: event.step || 0,
+          });
         } else if (event.type === 'action') {
-          // Complete tool call with full arguments
-          const toolId = `${event.tool}-stream-${event.step || 0}`;
-          let toolCall = toolCallsMap.get(toolId);
-
-          if (!toolCall) {
-            toolCall = {
-              toolCallId: toolId,
-              toolName: event.tool || 'unknown',
-              args: event.args || {},
-              argsText: JSON.stringify(event.args || {}, null, 2),
-              status: { type: 'running' } as ToolCallMessagePartStatus,
-              addResult: () => {},
-              resume: () => {},
-              order: toolCallOrder++,
-            };
-            toolCallsMap.set(toolId, toolCall);
-            toolCalls.push(toolCall);
-          } else {
-            const updatedToolCall = {
-              ...toolCall,
-              args: event.args || {},
-              argsText: JSON.stringify(event.args || {}, null, 2),
-            };
-            toolCallsMap.set(toolId, updatedToolCall);
-            const index = toolCalls.findIndex(tc => tc.toolCallId === toolId);
-            if (index !== -1) {
-              toolCalls[index] = updatedToolCall;
-            }
-          }
+          const key = `${event.tool}-${event.step || 0}`;
+          streamingState.set(key, {
+            toolName: event.tool || 'unknown',
+            argsText: JSON.stringify(event.args || {}, null, 2),
+            args: event.args || {},
+            status: 'running',
+            step: event.step || 0,
+          });
         } else if (event.type === 'tool_call_block' && event.block) {
-          // Handle tool_call_block event - replaces streaming version
           const blockContent = event.block.content as any;
-          const toolId = event.block.id;
           const toolName = blockContent.tool_name || 'unknown';
-
-          // Remove any streaming version of this tool call (find by prefix)
-          const streamingPrefix = `${toolName}-stream-`;
-          for (const [key] of toolCallsMap) {
-            if (key.startsWith(streamingPrefix)) {
-              toolCallsMap.delete(key);
-              const streamingIndex = toolCalls.findIndex(tc => tc.toolCallId === key);
-              if (streamingIndex !== -1) {
-                toolCalls.splice(streamingIndex, 1);
-              }
-              break; // Only remove one (the most recent streaming one)
+          const toolNameLower = toolName.toLowerCase();
+          // Remove streaming version when we get the persisted block (case-insensitive)
+          for (const [k] of streamingState) {
+            if (k.toLowerCase().startsWith(toolNameLower + '-')) {
+              streamingState.delete(k);
+              break;
             }
           }
-
-          const toolCall = {
-            toolCallId: toolId,
-            toolName: toolName,
-            args: blockContent.arguments || {},
-            argsText: JSON.stringify(blockContent.arguments || {}, null, 2),
-            status: { type: blockContent.status === 'complete' ? 'complete' : 'running' } as ToolCallMessagePartStatus,
-            addResult: () => {},
-            resume: () => {},
-            order: toolCallOrder++,
-          };
-          toolCallsMap.set(toolId, toolCall);
-          toolCalls.push(toolCall);
         } else if (event.type === 'tool_result_block' && event.block) {
-          // Handle tool_result_block event
-          const blockContent = event.block.content as any;
-          const parentId = event.block.parent_block_id;
-
-          if (parentId && toolCallsMap.has(parentId)) {
-            const toolCall = toolCallsMap.get(parentId);
-            const updatedToolCall = {
-              ...toolCall,
-              result: blockContent.result,
-              isError: !blockContent.success,
-              status: { type: 'complete' },
-            };
-            toolCallsMap.set(parentId, updatedToolCall);
-            const index = toolCalls.findIndex(tc => tc.toolCallId === parentId);
-            if (index !== -1) {
-              toolCalls[index] = updatedToolCall;
-            }
-          }
+          // Results will be handled via toolBlocks
         }
-      });
+      }
+    }
 
-      // Add streaming text (combine with base text content)
-      const combinedText = textContent + streamingText;
-      if (combinedText) {
-        parts.push({ type: 'text', content: combinedText, isStreaming: true });
+    // Step 2: Build tool calls from persisted blocks (sorted by sequence_number)
+    const toolCallsById = new Map<string, any>();
+    const toolResultsById = new Map<string, ContentBlock>();
+
+    if (toolBlocks.length > 0) {
+      // First pass: collect all results
+      for (const block of toolBlocks) {
+        if (block.block_type === 'tool_result' && block.parent_block_id) {
+          toolResultsById.set(block.parent_block_id, block);
+        }
       }
 
-      // Add tool calls sorted by order
-      toolCalls
-        .sort((a, b) => a.order - b.order)
-        .forEach(toolCall => {
-          const { order, ...rest } = toolCall;
-          parts.push({ type: 'tool-call', ...rest });
-        });
-    } else {
-      // Non-streaming message (or streaming but no events yet - e.g., after page refresh)
-      console.log('[AssistantUIMessage] Using persisted path:', {
-        hasTextContent: !!textContent,
-        textContentLength: textContent.length,
-        isStreaming,
-        toolBlocksCount: toolBlocks.length
-      });
-
-      if (textContent) {
-        // If the component is in streaming mode, use streaming styling even for persisted content
-        // This handles the case where we refresh during streaming - textContent comes from
-        // stream_sync but we still want the streaming cursor
-        parts.push({ type: 'text', content: textContent, isStreaming: isStreaming });
-      } else if (isStreaming) {
-        // No text content yet but we're streaming - show a placeholder with streaming cursor
-        // This happens when refreshing during tool execution (before any text is produced)
-        parts.push({ type: 'text', content: '', isStreaming: true });
-      }
-
-      // Add persisted tool blocks
-      if (toolBlocks && Array.isArray(toolBlocks) && toolBlocks.length > 0) {
-        // Sort by sequence_number
-        const sortedBlocks = [...toolBlocks].sort((a, b) => a.sequence_number - b.sequence_number);
-
-        // Group tool_call with their tool_result
-        const toolCallMap = new Map<string, { call: ContentBlock; result?: ContentBlock }>();
-
-        for (const toolBlock of sortedBlocks) {
-          if (toolBlock.block_type === 'tool_call') {
-            toolCallMap.set(toolBlock.id, { call: toolBlock });
-          } else if (toolBlock.block_type === 'tool_result') {
-            const parentId = toolBlock.parent_block_id;
-            if (parentId && toolCallMap.has(parentId)) {
-              const entry = toolCallMap.get(parentId)!;
-              entry.result = toolBlock;
-            } else {
-              // Orphan result - show anyway
-              const callContent = toolBlock.content as any;
-              parts.push({
-                type: 'tool-call',
-                toolCallId: toolBlock.id,
-                toolName: callContent.tool_name || 'unknown',
-                args: {},
-                argsText: '{}',
-                result: callContent.result,
-                isError: !callContent.success,
-                status: { type: 'complete' } as ToolCallMessagePartStatus,
-                addResult: () => {},
-                resume: () => {},
-              });
-            }
-          }
-        }
-
-        // Convert to parts
-        toolCallMap.forEach(({ call, result }) => {
-          const callContent = call.content as any;
+      // Second pass: build tool calls with their results
+      for (const block of toolBlocks) {
+        if (block.block_type === 'tool_call') {
+          const callContent = block.content as any;
+          const result = toolResultsById.get(block.id);
           const resultContent = result?.content as any;
 
-          parts.push({
-            type: 'tool-call',
-            toolCallId: call.id,
+          toolCallsById.set(block.id, {
+            toolCallId: block.id,
             toolName: callContent.tool_name || 'unknown',
             args: callContent.arguments || {},
             argsText: JSON.stringify(callContent.arguments || {}, null, 2),
             result: resultContent?.result || resultContent?.error,
             isError: resultContent ? !resultContent.success : false,
-            status: { type: result ? 'complete' : (callContent.status === 'running' ? 'running' : 'complete') } as ToolCallMessagePartStatus,
+            status: { type: result ? 'complete' : 'running' } as ToolCallMessagePartStatus,
+            sequenceNumber: block.sequence_number,
             addResult: () => {},
             resume: () => {},
-            // Include binary data if present
-            ...(result?.block_metadata?.type === 'image' ? {
-              result: result.block_metadata,
-            } : {}),
           });
-        });
+        }
       }
     }
 
-    // Debug log the parts created
-    if (toolBlocks.length > 0 || isStreaming) {
-      const toolCallParts = parts.filter(p => p.type === 'tool-call');
-      console.log('[AssistantUIMessage] messageParts created:', {
-        totalParts: parts.length,
-        toolCallParts: toolCallParts.length,
-        partTypes: parts.map(p => p.type),
-        toolCallNames: toolCallParts.map(p => p.toolName),
-        usedStreamingPath: isStreaming && streamEvents.length > 0,
-        usedPersistedPath: !(isStreaming && streamEvents.length > 0)
+    // Step 3: Add text content
+    const fullText = textContent + streamingText;
+    if (fullText) {
+      parts.push({
+        type: 'text',
+        content: fullText,
+        isStreaming: isStreaming && (streamingText.length > 0 || streamEvents.length > 0),
+      });
+    } else if (isStreaming) {
+      // Show streaming cursor even with no text
+      parts.push({ type: 'text', content: '', isStreaming: true });
+    }
+
+    // Step 4: Add tool calls - persisted first (by sequence), then any streaming-only tools
+    // Sort persisted tools by sequence_number
+    const sortedPersistedTools = Array.from(toolCallsById.values())
+      .sort((a, b) => a.sequenceNumber - b.sequenceNumber);
+
+    for (const tool of sortedPersistedTools) {
+      // Check if there's a streaming version with more recent state (case-insensitive)
+      const toolNameLower = tool.toolName.toLowerCase();
+      let streamingVersion = null;
+      let streamingKey = null;
+      for (const [key, state] of streamingState) {
+        if (key.toLowerCase().startsWith(toolNameLower + '-')) {
+          streamingVersion = state;
+          streamingKey = key;
+          break;
+        }
+      }
+
+      if (streamingVersion && !tool.result) {
+        // Tool is still streaming - use streaming state for args
+        parts.push({
+          type: 'tool-call',
+          toolCallId: tool.toolCallId,
+          toolName: tool.toolName,
+          args: streamingVersion.args,
+          argsText: streamingVersion.argsText,
+          status: { type: streamingVersion.status === 'running' ? 'running' : 'running' },
+          addResult: () => {},
+          resume: () => {},
+        });
+        // Remove from streaming state since we've used it
+        if (streamingKey) {
+          streamingState.delete(streamingKey);
+        }
+      } else {
+        // Use persisted state
+        const { sequenceNumber, ...rest } = tool;
+        parts.push({ type: 'tool-call', ...rest });
+      }
+    }
+
+    // Add any remaining streaming-only tools (not yet persisted)
+    for (const [key, state] of streamingState) {
+      parts.push({
+        type: 'tool-call',
+        toolCallId: `streaming-${key}`,
+        toolName: state.toolName,
+        args: state.args,
+        argsText: state.argsText,
+        result: state.result,
+        isError: state.isError,
+        status: { type: state.status === 'complete' ? 'complete' : 'running' } as ToolCallMessagePartStatus,
+        addResult: () => {},
+        resume: () => {},
       });
     }
 
     return parts;
-  }, [block, toolBlocks, isStreaming, streamEvents, textContent]);
+  }, [block.id, toolBlocks, isStreaming, streamEvents, textContent]);
 
   const renderPart = (part: any, index: number) => {
     if (part.type === 'text') {
       if (part.isStreaming) {
-        return (
-          <StreamingText key={index} content={part.content} />
-        );
+        return <StreamingText key={index} content={part.content} />;
       } else {
         return (
           <ReactMarkdown
@@ -403,8 +301,7 @@ export const AssistantUIMessage: React.FC<AssistantUIMessageProps> = ({
         );
       }
     } else if (part.type === 'tool-call') {
-      // Use DefaultToolFallback for all tool calls
-      return <DefaultToolFallback key={index} {...part} />;
+      return <DefaultToolFallback key={part.toolCallId || index} {...part} />;
     }
     return null;
   };

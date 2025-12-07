@@ -12,7 +12,7 @@
  * Now works with ContentBlocks instead of Messages.
  */
 
-import { useRef, forwardRef, memo, useCallback, useMemo } from 'react';
+import { useRef, forwardRef, useCallback, useMemo } from 'react';
 import { Virtuoso, VirtuosoHandle } from 'react-virtuoso';
 import { AssistantUIMessage } from './AssistantUIMessage';
 import './AssistantUIChat.css';
@@ -38,17 +38,9 @@ const CustomScroller = forwardRef<HTMLDivElement, any>(({ style, ...props }, ref
 ));
 CustomScroller.displayName = 'CustomScroller';
 
-// Memoized message component for performance
-const MemoizedAssistantUIMessage = memo(AssistantUIMessage, (prevProps, nextProps) => {
-  // Only re-render if essential properties change
-  return (
-    prevProps.block.id === nextProps.block.id &&
-    prevProps.block.content?.text === nextProps.block.content?.text &&
-    prevProps.isStreaming === nextProps.isStreaming &&
-    prevProps.streamEvents?.length === nextProps.streamEvents?.length &&
-    prevProps.toolBlocks?.length === nextProps.toolBlocks?.length
-  );
-});
+// No custom memo - let React handle re-renders naturally
+// The complex memo comparison was causing issues with streaming updates
+const MemoizedAssistantUIMessage = AssistantUIMessage;
 
 /**
  * Group content blocks into display groups:
