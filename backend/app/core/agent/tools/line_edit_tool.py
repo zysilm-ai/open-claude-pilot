@@ -100,23 +100,27 @@ class LineEditTool(Tool):
         return (
             "Line-based file editing - use line numbers from file_read output.\n\n"
             "COMMANDS:\n"
-            "- replace: Replace lines start_line to end_line with new_content\n"
+            "- replace: Replace lines start_line to end_line (INCLUSIVE) with new_content\n"
             "- insert: Insert new_content after insert_line (0 = file start)\n"
-            "- delete: Delete lines start_line to end_line\n\n"
+            "- delete: Delete lines start_line to end_line (INCLUSIVE)\n\n"
+            "CRITICAL - LINE RANGES ARE INCLUSIVE:\n"
+            "- To edit ONLY line 7: use start_line=7, end_line=7 (SAME number!)\n"
+            "- To edit lines 7-9: use start_line=7, end_line=9 (edits 7, 8, AND 9)\n"
+            "- WRONG: start_line=7, end_line=8 to edit line 7 (this also removes line 8!)\n\n"
             "FEATURES:\n"
             "- Auto-indentation: Content is automatically indented to match context\n"
             "- Syntax validation: Python files are validated before saving\n"
             "- No whitespace matching issues!\n\n"
             "EXAMPLES:\n"
-            "  Replace lines 15-17:\n"
+            "  Replace SINGLE line 15:\n"
             '    edit_lines(command="replace", path="/workspace/out/main.py",\n'
-            '               start_line=15, end_line=17, new_content="return result")\n\n'
+            '               start_line=15, end_line=15, new_content="    return result")\n\n'
+            "  Replace lines 15-17 (3 lines):\n"
+            '    edit_lines(command="replace", path="/workspace/out/main.py",\n'
+            '               start_line=15, end_line=17, new_content="line1\\nline2\\nline3")\n\n'
             "  Insert after line 10:\n"
             '    edit_lines(command="insert", path="/workspace/out/main.py",\n'
-            '               insert_line=10, new_content="# New comment")\n\n'
-            "  Delete lines 5-8:\n"
-            '    edit_lines(command="delete", path="/workspace/out/main.py",\n'
-            "               start_line=5, end_line=8)"
+            '               insert_line=10, new_content="# New comment")'
         )
 
     @property
@@ -307,6 +311,16 @@ class LineEditTool(Tool):
                 for i, line in enumerate(new_content_lines):
                     line_num = new_start + i
                     output_parts.append(f"  {line_num:>4}: {line}")
+
+            # Add warning if line counts differ significantly (helps catch mistakes)
+            if command == "replace" and old_content_lines and new_content_lines:
+                removed_count = len(old_content_lines)
+                added_count = len(new_content_lines)
+                if removed_count != added_count:
+                    output_parts.append("")
+                    output_parts.append(f"NOTE: Removed {removed_count} line(s), added {added_count} line(s).")
+                    if removed_count > added_count:
+                        output_parts.append("      If unintended, you may have specified too large a line range.")
 
             return ToolResult(
                 success=True,
