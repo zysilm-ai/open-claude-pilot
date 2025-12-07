@@ -87,7 +87,9 @@
       "WebFetch(domain:www.npmjs.com)",
       "WebFetch(domain:ast-grep.github.io)",
       "Bash(./build_images.sh:*)",
-      "Bash(bash build_images.sh:*)"
+      "Bash(bash build_images.sh:*)",
+      "WebFetch(domain:docs.claude.com)",
+      "WebFetch(domain:fabianhertwig.com)"
     ],
     "deny": [],
     "ask": []
