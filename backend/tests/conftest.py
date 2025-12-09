@@ -41,12 +41,9 @@ from app.models.database.file import FileType
 # Event Loop Configuration
 # ============================================================================
 
-@pytest.fixture(scope="session")
-def event_loop():
-    """Create an instance of the default event loop for the test session."""
-    loop = asyncio.get_event_loop_policy().new_event_loop()
-    yield loop
-    loop.close()
+# Note: event_loop fixture moved to conftest files with function scope to avoid
+# conflicts when running all tests together. The pytest_asyncio.fixture uses
+# the default event loop configuration.
 
 
 # ============================================================================
