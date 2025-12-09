@@ -462,9 +462,12 @@ export const AssistantUIMessage: React.FC<AssistantUIMessageProps> = ({
       if (currentToolGroup.length > 0) {
         // Only use ToolStepGroup if we have enough tools to warrant it
         if (currentToolGroup.length > 2) {
-          // Get the tool blocks for this group
-          const toolBlockIds = new Set(currentToolGroup.map(p => p.toolCallId));
-          const groupToolBlocks = toolBlocks.filter(b => toolBlockIds.has(b.id));
+          // Get the tool blocks for this group (both tool_call and their tool_result blocks)
+          const toolCallIds = new Set(currentToolGroup.map(p => p.toolCallId));
+          const groupToolBlocks = toolBlocks.filter(b =>
+            toolCallIds.has(b.id) ||  // Include tool_call blocks
+            (b.block_type === 'tool_result' && b.parent_block_id && toolCallIds.has(b.parent_block_id))  // Include tool_result blocks
+          );
           result.push(
             <ToolStepGroup
               key={`tool-group-${toolGroupStartIndex}`}

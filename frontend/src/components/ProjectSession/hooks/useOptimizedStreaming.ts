@@ -336,8 +336,9 @@ export const useOptimizedStreaming = ({
         break;
 
       case 'assistant_text_end':
-        // Assistant finished streaming
+        // Assistant finished streaming a text block
         const endBlockId = data.block_id;
+        const isFinal = data.is_final === true;  // Check if this is the final text block
 
         // Final flush of any remaining content for this block
         if (endBlockId) {
@@ -376,39 +377,51 @@ export const useOptimizedStreaming = ({
           eventBufferRef.current = [];
         }
 
-        // Check if any blocks are still streaming
-        const stillStreaming = Array.from(streamStatesRef.current.values())
-          .some(s => s.streaming);
-
-        if (!stillStreaming) {
+        // Only end streaming if this is the FINAL text block
+        if (isFinal) {
           // Clear streaming state and events
           setStreamEvents([]);
 
           // CRITICAL: We need to refetch BEFORE setting isStreaming to false
-          // Otherwise the merge effect will overwrite local blocks with stale initialBlocks
-          // Use a small delay to ensure backend has persisted the final content
           setTimeout(async () => {
             try {
               await queryClient.refetchQueries({
                 queryKey: ['contentBlocks', sessionId],
                 exact: true
               });
-              // Only clear isStreaming AFTER refetch completes
-              // The refetch will update initialBlocks, and THEN we set isStreaming to false
-              // This ensures the merge effect uses the updated initialBlocks
               setIsStreaming(false);
             } catch {
-              // Still set isStreaming to false on error
               setIsStreaming(false);
             }
-          }, 100); // 100ms delay to let backend persist
+          }, 100);
         } else {
-          // Other blocks still streaming, just refetch to get updated tool blocks
+          // Not final - just refetch to get updated blocks, keep streaming
           queryClient.refetchQueries({
             queryKey: ['contentBlocks', sessionId],
             exact: true
           });
         }
+        break;
+
+      case 'agent_complete':
+        // Agent finished executing (no more text blocks)
+        streamStatesRef.current.clear();
+        activeBlockIdRef.current = null;
+        eventBufferRef.current = [];
+        setStreamEvents([]);
+
+        // Refetch and end streaming
+        setTimeout(async () => {
+          try {
+            await queryClient.refetchQueries({
+              queryKey: ['contentBlocks', sessionId],
+              exact: true
+            });
+            setIsStreaming(false);
+          } catch {
+            setIsStreaming(false);
+          }
+        }, 100);
         break;
 
       case 'end':

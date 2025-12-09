@@ -902,11 +902,12 @@ class ChatWebSocketHandler:
                         await self._safe_commit()
                         print(f"[AGENT] Finalized text block {current_text_block.id} with {len(assistant_content)} chars before tool call")
 
-                        # Send assistant_text_end for this block
+                        # Send assistant_text_end for this block (intermediate - not final)
                         try:
                             await self.websocket.send_json({
                                 "type": "assistant_text_end",
-                                "block_id": current_text_block.id
+                                "block_id": current_text_block.id,
+                                "is_final": False  # Indicates more content may follow
                             })
                         except:
                             print(f"[AGENT] WebSocket disconnected during assistant_text_end")
@@ -1219,13 +1220,14 @@ class ChatWebSocketHandler:
             await self._safe_commit()
             print(f"[AGENT] Final text block saved with ID: {current_text_block.id}, Content length: {len(assistant_content)} chars")
 
-            # Send completion for this block
+            # Send completion for this block (final - no more content)
             try:
                 await self.websocket.send_json({
                     "type": "assistant_text_end",
                     "block_id": current_text_block.id,
                     "has_error": has_error,
-                    "cancelled": cancelled
+                    "cancelled": cancelled,
+                    "is_final": True  # Indicates this is the last text block
                 })
             except:
                 print(f"[AGENT] WebSocket disconnected, cannot send end message")
@@ -1234,6 +1236,26 @@ class ChatWebSocketHandler:
             await self.db.delete(current_text_block)
             await self._safe_commit()
             print(f"[AGENT] Deleted empty text block {current_text_block.id}")
+
+            # Still send final signal
+            try:
+                await self.websocket.send_json({
+                    "type": "agent_complete",
+                    "has_error": has_error,
+                    "cancelled": cancelled
+                })
+            except:
+                print(f"[AGENT] WebSocket disconnected, cannot send agent_complete")
+        elif current_text_block is None:
+            # No text block at all (tools ran without any text after last finalization)
+            try:
+                await self.websocket.send_json({
+                    "type": "agent_complete",
+                    "has_error": has_error,
+                    "cancelled": cancelled
+                })
+            except:
+                print(f"[AGENT] WebSocket disconnected, cannot send agent_complete")
 
         # Mark as finalized in streaming manager
         await streaming_manager.mark_finalized(session_id)
