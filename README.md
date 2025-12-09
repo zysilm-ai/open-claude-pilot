@@ -7,9 +7,7 @@
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 [![Node.js 18+](https://img.shields.io/badge/node-18+-339933?logo=node.js&logoColor=white)](https://nodejs.org/)
 [![Docker](https://img.shields.io/badge/docker-required-2496ED?logo=docker&logoColor=white)](https://www.docker.com/)
-[![License: MIT](https://img.shields.io/badge/license-MIT-yellow.svg)](LICENSE)
-
-[Features](#features) · [Quick Start](#quick-start) · [Documentation](#documentation) · [Contributing](#contributing)
+[Features](#features) · [Quick Start](#quick-start) · [Documentation](#documentation)
 
 </div>
 
@@ -207,35 +205,6 @@ The agent will:
 - Show you results and iterate based on errors
 - Present the final output
 
-## Contributing
-
-Contributions are welcome! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
-
-### Development Setup
-
-```bash
-# Backend
-cd backend
-pip install -r requirements-dev.txt
-pytest
-black app tests
-mypy app
-
-# Frontend
-cd frontend
-npm install
-npm run lint
-npm run test:e2e
-```
-
-### Areas for Contribution
-
-- New agent tools
-- Additional LLM provider support
-- UI/UX improvements
-- Documentation
-- Bug fixes and optimizations
-
 ## Related Projects
 
 BreezeRun is inspired by:
@@ -243,10 +212,6 @@ BreezeRun is inspired by:
 - [OpenHands](https://github.com/All-Hands-AI/OpenHands) - Open-source AI software engineers
 - [Aider](https://aider.chat) - AI pair programming in terminal
 - [Continue](https://continue.dev) - AI code assistant for IDEs
-
-## License
-
-MIT License - see [LICENSE](LICENSE) for details.
 
 ---
 
