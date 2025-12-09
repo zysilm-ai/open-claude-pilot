@@ -21,16 +21,11 @@ BreezeRun is a self-hosted alternative to cloud-based AI coding assistants. It p
 
 **Key benefits:**
 - **Privacy** - Your code stays on your infrastructure
-- **Choice** - Use any LLM provider (OpenAI, Anthropic, Google, or 100+ others via LiteLLM)
+- **Choice** - Use any LLM provider (Ollama, OpenAI, Anthropic, Google, or 100+ others via LiteLLM)
 - **Control** - Configure agents, tools, and execution environments per project
 - **Safety** - All code execution happens in sandboxed Docker containers
 
 ## Feature Highlights
-
-### Secure Multi-Provider API Key Management
-Store API keys for 10+ LLM providers securely with AES-128 encryption. Keys are never displayed after saving and only decrypted when making API calls.
-
-![API key settings](docs/images/settings-api-keys.png)
 
 ### Flexible Project Management
 Organize your work into projects with multiple chat sessions. Configure LLM providers and models per project, upload files, and manage agent settings.
@@ -91,11 +86,11 @@ Modern React frontend with optimized streaming:
 
 Use any LLM via LiteLLM:
 
-- OpenAI (GPT-4o, GPT-4o-mini)
-- Anthropic (Claude Sonnet 4, Claude Opus 4)
-- Google (Gemini Pro, Gemini Flash)
-- Azure OpenAI
-- Groq, Together, Ollama, and 100+ more
+- OpenAI
+- Anthropic
+- Google Gemini
+- Ollama
+- Groq, Together, and 100+ more
 
 ## Quick Start
 
