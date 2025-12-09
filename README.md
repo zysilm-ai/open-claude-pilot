@@ -1,8 +1,8 @@
 <div align="center">
 
-# OpenCodex
+# BreezeRun
 
-**Self-hosted AI coding assistant with autonomous agents and sandboxed execution**
+**Run your code like a breeze** - Self-hosted AI coding assistant with autonomous agents and sandboxed execution
 
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 [![Node.js 18+](https://img.shields.io/badge/node-18+-339933?logo=node.js&logoColor=white)](https://nodejs.org/)
@@ -15,9 +15,9 @@
 
 ---
 
-## What is OpenCodex?
+## What is BreezeRun?
 
-OpenCodex is a self-hosted alternative to cloud-based AI coding assistants. It provides a web interface for interacting with autonomous AI agents that can write, execute, and debug code in isolated Docker containers.
+BreezeRun is a self-hosted alternative to cloud-based AI coding assistants. It provides a web interface for interacting with autonomous AI agents that can write, execute, and debug code in isolated Docker containers.
 
 **Key benefits:**
 - **Privacy** - Your code stays on your infrastructure
@@ -88,8 +88,8 @@ Use any LLM via LiteLLM:
 
 ```bash
 # Clone the repository
-git clone https://github.com/anthropics/opencodex.git
-cd opencodex
+git clone https://github.com/zysoong/breezerun.git
+cd breezerun
 
 # Backend setup
 cd backend
@@ -129,7 +129,7 @@ OPENAI_API_KEY=sk-...
 ANTHROPIC_API_KEY=sk-ant-...
 
 # Database
-DATABASE_URL=sqlite+aiosqlite:///./data/open_codex.db
+DATABASE_URL=sqlite+aiosqlite:///./data/breezerun.db
 
 # Security
 SECRET_KEY=generate-a-random-key
@@ -137,7 +137,7 @@ ENCRYPTION_KEY=generate-a-32-byte-key
 
 # Docker
 DOCKER_HOST=unix:///var/run/docker.sock
-CONTAINER_PREFIX=opencodex
+CONTAINER_PREFIX=breezerun
 ```
 
 See [backend/README.md](backend/README.md) for all configuration options.
@@ -238,7 +238,7 @@ npm run test:e2e
 
 ## Related Projects
 
-OpenCodex is inspired by:
+BreezeRun is inspired by:
 
 - [OpenHands](https://github.com/All-Hands-AI/OpenHands) - Open-source AI software engineers
 - [Aider](https://aider.chat) - AI pair programming in terminal
@@ -252,6 +252,6 @@ MIT License - see [LICENSE](LICENSE) for details.
 
 <div align="center">
 
-**[Get Started](#quick-start)** · **[Report Bug](https://github.com/anthropics/opencodex/issues)** · **[Request Feature](https://github.com/anthropics/opencodex/issues)**
+**[Get Started](#quick-start)** · **[Report Bug](https://github.com/zysoong/breezerun/issues)** · **[Request Feature](https://github.com/zysoong/breezerun/issues)**
 
 </div>

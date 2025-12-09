@@ -1,7 +1,7 @@
 [tool.poetry]
-name = "open-codex-gui-backend"
+name = "breezerun-backend"
 version = "0.1.0"
-description = "Open Codex GUI - Local LLM Agent Development Environment"
+description = "BreezeRun - Run your code like a breeze"
 authors = ["Ziyang Song <soongziyang@gmail.com>"]
 readme = "README.md"
 package-mode = false

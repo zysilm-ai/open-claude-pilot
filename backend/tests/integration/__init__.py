@@ -1,1 +1,1 @@
-"""Integration tests for the OpenCodex backend."""
+"""Integration tests for the BreezeRun backend."""

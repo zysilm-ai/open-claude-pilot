@@ -40,8 +40,8 @@ async def lifespan(app: FastAPI):
 
 # Create FastAPI app
 app = FastAPI(
-    title="Open Codex Backend",
-    description="Backend API for Open Codex GUI",
+    title="BreezeRun Backend",
+    description="Backend API for BreezeRun",
     version="0.1.0",
     lifespan=lifespan,
 )
@@ -67,7 +67,7 @@ app.include_router(settings_routes.router, prefix="/api/v1")
 async def root():
     """Root endpoint."""
     return {
-        "name": "Open Codex Backend",
+        "name": "BreezeRun Backend",
         "version": "0.1.0",
         "status": "running",
     }

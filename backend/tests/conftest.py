@@ -1,5 +1,5 @@
 """
-Pytest configuration and fixtures for the OpenCodex backend test suite.
+Pytest configuration and fixtures for the BreezeRun backend test suite.
 """
 
 import os

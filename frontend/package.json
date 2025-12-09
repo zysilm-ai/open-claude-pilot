@@ -1,7 +1,7 @@
 {
-  "name": "open-codex-frontend",
+  "name": "breezerun-frontend",
   "version": "0.1.0",
-  "description": "Frontend for Open Codex GUI",
+  "description": "Frontend for BreezeRun - Run your code like a breeze",
   "main": "electron/main.js",
   "type": "module",
   "scripts": {

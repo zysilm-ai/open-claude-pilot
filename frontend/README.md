@@ -1,4 +1,4 @@
-# OpenCodex Frontend
+# BreezeRun Frontend
 
 <div align="center">
 
@@ -15,7 +15,7 @@
 
 ## Overview
 
-The OpenCodex frontend provides a real-time chat interface for interacting with autonomous AI coding agents. Built with React and TypeScript, it features optimized streaming, virtual scrolling, and rich tool visualization.
+The BreezeRun frontend provides a real-time chat interface for interacting with autonomous AI coding agents. Built with React and TypeScript, it features optimized streaming, virtual scrolling, and rich tool visualization.
 
 ## Features
 

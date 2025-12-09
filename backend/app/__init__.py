@@ -1,3 +1,3 @@
-"""Open Codex Backend Application."""
+"""BreezeRun Backend Application."""
 
 __version__ = "0.1.0"

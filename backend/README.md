@@ -1,4 +1,4 @@
-# OpenCodex Backend
+# BreezeRun Backend
 
 <div align="center">
 
@@ -15,7 +15,7 @@
 
 ## Overview
 
-The OpenCodex backend provides a ReAct-based agent system with sandboxed code execution. It supports multiple LLM providers via LiteLLM and executes code safely in isolated Docker containers.
+The BreezeRun backend provides a ReAct-based agent system with sandboxed code execution. It supports multiple LLM providers via LiteLLM and executes code safely in isolated Docker containers.
 
 ## Features
 
@@ -91,8 +91,8 @@ poetry run python -m app.main
 ### Docker
 
 ```bash
-docker build -t opencodex-backend .
-docker run -p 8000:8000 --env-file .env -v /var/run/docker.sock:/var/run/docker.sock opencodex-backend
+docker build -t breezerun-backend .
+docker run -p 8000:8000 --env-file .env -v /var/run/docker.sock:/var/run/docker.sock breezerun-backend
 ```
 
 ## Configuration
@@ -107,7 +107,7 @@ GOOGLE_API_KEY=...
 GROQ_API_KEY=...
 
 # Database
-DATABASE_URL=sqlite+aiosqlite:///./data/open_codex.db
+DATABASE_URL=sqlite+aiosqlite:///./data/breezerun.db
 
 # Security
 SECRET_KEY=your-secret-key
@@ -120,7 +120,7 @@ CORS_ORIGINS=["http://localhost:5173"]
 
 # Docker
 DOCKER_HOST=unix:///var/run/docker.sock
-CONTAINER_PREFIX=opencodex
+CONTAINER_PREFIX=breezerun
 CONTAINER_POOL_SIZE=5
 
 # Storage
@@ -371,7 +371,7 @@ newgrp docker
 
 ```bash
 # Enable WAL mode
-sqlite3 data/open_codex.db "PRAGMA journal_mode=WAL;"
+sqlite3 data/breezerun.db "PRAGMA journal_mode=WAL;"
 ```
 
 ### Port in Use
