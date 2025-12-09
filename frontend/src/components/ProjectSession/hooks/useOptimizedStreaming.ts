@@ -204,11 +204,18 @@ export const useOptimizedStreaming = ({
         break;
 
       case 'assistant_text_start':
-        // Assistant started streaming
+        // Assistant started streaming a new text block
+        // With multiple text blocks per response, we may receive multiple assistant_text_start events
         setIsStreaming(true);
         setError(null);
-        setStreamEvents([]);
-        eventBufferRef.current = [];
+
+        // Only clear stream events if this is the FIRST text block (no active blocks yet)
+        // This preserves tool events when creating subsequent text blocks after tools
+        const isFirstTextBlock = streamStatesRef.current.size === 0;
+        if (isFirstTextBlock) {
+          setStreamEvents([]);
+          eventBufferRef.current = [];
+        }
 
         // Initialize stream state for this block
         streamStatesRef.current.set(data.block_id, {
@@ -218,21 +225,27 @@ export const useOptimizedStreaming = ({
         });
         activeBlockIdRef.current = data.block_id;
 
-        // Add new assistant_text block
-        setBlocks(prev => [
-          ...prev,
-          {
-            id: data.block_id,
-            chat_session_id: sessionId,
-            sequence_number: data.sequence_number || 0,
-            block_type: 'assistant_text',
-            author: 'assistant',
-            content: { text: '' },
-            block_metadata: { streaming: true },
-            created_at: new Date().toISOString(),
-            updated_at: new Date().toISOString(),
-          } as ContentBlock
-        ]);
+        // Add new assistant_text block (only if not already exists)
+        setBlocks(prev => {
+          // Check if block already exists (from API refetch)
+          if (prev.some(b => b.id === data.block_id)) {
+            return prev;
+          }
+          return [
+            ...prev,
+            {
+              id: data.block_id,
+              chat_session_id: sessionId,
+              sequence_number: data.sequence_number || 0,
+              block_type: 'assistant_text',
+              author: 'assistant',
+              content: { text: '' },
+              block_metadata: { streaming: true },
+              created_at: new Date().toISOString(),
+              updated_at: new Date().toISOString(),
+            } as ContentBlock
+          ];
+        });
         break;
 
       case 'chunk':
@@ -329,6 +342,7 @@ export const useOptimizedStreaming = ({
         // Final flush of any remaining content for this block
         if (endBlockId) {
           const state = streamStatesRef.current.get(endBlockId);
+
           if (state && state.bufferedContent) {
             setBlocks(prev => {
               const updated = [...prev];
@@ -370,7 +384,8 @@ export const useOptimizedStreaming = ({
           // Clear streaming state and events
           setStreamEvents([]);
 
-          // Refetch blocks from API to get persisted version
+          // CRITICAL: We need to refetch BEFORE setting isStreaming to false
+          // Otherwise the merge effect will overwrite local blocks with stale initialBlocks
           // Use a small delay to ensure backend has persisted the final content
           setTimeout(async () => {
             try {
@@ -378,11 +393,14 @@ export const useOptimizedStreaming = ({
                 queryKey: ['contentBlocks', sessionId],
                 exact: true
               });
-            } catch (err) {
-              console.error('[WS] assistant_text_end - Refetch failed:', err);
+              // Only clear isStreaming AFTER refetch completes
+              // The refetch will update initialBlocks, and THEN we set isStreaming to false
+              // This ensures the merge effect uses the updated initialBlocks
+              setIsStreaming(false);
+            } catch {
+              // Still set isStreaming to false on error
+              setIsStreaming(false);
             }
-            // Only clear isStreaming after refetch completes
-            setIsStreaming(false);
           }, 100); // 100ms delay to let backend persist
         } else {
           // Other blocks still streaming, just refetch to get updated tool blocks
@@ -615,8 +633,15 @@ export const useOptimizedStreaming = ({
         // Check for temp user blocks that haven't been confirmed by server yet
         const tempUserBlocks = prev.filter(b => b.id.startsWith('temp-user-'));
 
-        // If not streaming, use initialBlocks but preserve any temp user blocks
+        // CRITICAL FIX: Don't blindly replace local blocks with initialBlocks when streaming ends.
+        // If local state has MORE blocks than initialBlocks, keep the local state.
+        // This prevents the race condition where isStreaming becomes false before refetch completes.
         if (!isStreaming) {
+          // If local state has more blocks, it means we have fresher data
+          // (streaming added blocks that haven't been refetched yet)
+          if (prev.length > initialBlocks.length) {
+            return prev;
+          }
           if (tempUserBlocks.length > 0) {
             // Merge: initialBlocks + temp user blocks (sorted by sequence)
             const merged = [...initialBlocks, ...tempUserBlocks];

@@ -267,6 +267,7 @@ const StepComponent: React.FC<{
             return (
               <DefaultToolFallback
                 key={block.id}
+                type="tool-call"
                 toolCallId={block.id}
                 toolName={content?.tool_name || 'unknown'}
                 args={content?.arguments || {}}
@@ -275,6 +276,7 @@ const StepComponent: React.FC<{
                 isError={resultContent ? !resultContent.success : false}
                 status={{ type: result ? 'complete' : 'running' }}
                 addResult={() => {}}
+                resume={() => {}}
               />
             );
           })}
@@ -328,6 +330,7 @@ export const ToolStepGroup: React.FC<ToolStepGroupProps> = ({
             return (
               <DefaultToolFallback
                 key={block.id}
+                type="tool-call"
                 toolCallId={block.id}
                 toolName={content?.tool_name || 'unknown'}
                 args={content?.arguments || {}}
@@ -336,6 +339,7 @@ export const ToolStepGroup: React.FC<ToolStepGroupProps> = ({
                 isError={resultContent ? !resultContent.success : false}
                 status={{ type: result ? 'complete' : 'running' }}
                 addResult={() => {}}
+                resume={() => {}}
               />
             );
           })
@@ -344,6 +348,7 @@ export const ToolStepGroup: React.FC<ToolStepGroupProps> = ({
         {streamingTools.map(tool => (
           <DefaultToolFallback
             key={tool.toolCallId}
+            type="tool-call"
             toolCallId={tool.toolCallId}
             toolName={tool.toolName}
             args={tool.args}
@@ -352,6 +357,7 @@ export const ToolStepGroup: React.FC<ToolStepGroupProps> = ({
             isError={tool.isError}
             status={tool.status as any}
             addResult={() => {}}
+            resume={() => {}}
           />
         ))}
       </>
@@ -409,6 +415,7 @@ export const ToolStepGroup: React.FC<ToolStepGroupProps> = ({
             {streamingTools.map(tool => (
               <DefaultToolFallback
                 key={tool.toolCallId}
+                type="tool-call"
                 toolCallId={tool.toolCallId}
                 toolName={tool.toolName}
                 args={tool.args}
@@ -417,6 +424,7 @@ export const ToolStepGroup: React.FC<ToolStepGroupProps> = ({
                 isError={tool.isError}
                 status={tool.status as any}
                 addResult={() => {}}
+                resume={() => {}}
               />
             ))}
           </div>

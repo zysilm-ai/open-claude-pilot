@@ -78,6 +78,7 @@ const StreamingText: React.FC<{ content: string }> = ({ content }) => {
 
 interface AssistantUIMessageProps {
   block: ContentBlock;
+  textBlocks?: ContentBlock[];  // All text blocks in this response (for multi-block support)
   toolBlocks?: ContentBlock[];
   isStreaming?: boolean;
   streamEvents?: StreamEvent[];
@@ -85,20 +86,38 @@ interface AssistantUIMessageProps {
 
 export const AssistantUIMessage: React.FC<AssistantUIMessageProps> = ({
   block,
+  textBlocks = [],
   toolBlocks = [],
   isStreaming = false,
   streamEvents = [],
 }) => {
   const role = block.block_type === 'user_text' ? 'user' : 'assistant';
-  const textContent = block.content?.text || '';
 
-  // Build message parts and determine text position
-  const { messageParts, showTextAfterTools, streamingToolParts } = useMemo(() => {
+  // Use textBlocks if provided, otherwise fall back to single block
+  const allTextBlocks = textBlocks.length > 0 ? textBlocks : [block];
+
+  // For user messages, just use the block content directly
+  const userTextContent = role === 'user' ? (block.content?.text || '') : '';
+
+  // Build message parts with proper interleaving based on sequence_number
+  const { messageParts, streamingToolParts } = useMemo(() => {
     const parts: any[] = [];
-    let textAfterTools = false;
 
-    // Step 1: Build streaming tool state from events (latest state for each tool)
-    const streamingState = new Map<string, {
+    // For user messages, just return a single text part
+    if (role === 'user') {
+      if (userTextContent) {
+        parts.push({
+          type: 'text',
+          content: userTextContent,
+          isStreaming: false,
+          sequenceNumber: block.sequence_number,
+        });
+      }
+      return { messageParts: parts, streamingToolParts: [] };
+    }
+
+    // Step 1: Build streaming state from events
+    const streamingToolState = new Map<string, {
       toolName: string;
       argsText: string;
       args: any;
@@ -111,14 +130,12 @@ export const AssistantUIMessage: React.FC<AssistantUIMessageProps> = ({
     let streamingText = '';
 
     if (streamEvents.length > 0) {
-      // Process ALL events to get final state for each streaming tool
       for (const event of streamEvents) {
         if (event.type === 'chunk') {
           streamingText += event.content || '';
         } else if (event.type === 'action_streaming') {
-          // Tool just started - show it immediately with empty args
           const key = `${event.tool}-${event.step || 0}`;
-          streamingState.set(key, {
+          streamingToolState.set(key, {
             toolName: event.tool || 'unknown',
             argsText: '',
             args: {},
@@ -133,7 +150,7 @@ export const AssistantUIMessage: React.FC<AssistantUIMessageProps> = ({
             if (argsString) parsedArgs = JSON.parse(argsString);
           } catch { /* Incomplete JSON */ }
 
-          streamingState.set(key, {
+          streamingToolState.set(key, {
             toolName: event.tool || 'unknown',
             argsText: argsString,
             args: parsedArgs,
@@ -142,7 +159,7 @@ export const AssistantUIMessage: React.FC<AssistantUIMessageProps> = ({
           });
         } else if (event.type === 'action') {
           const key = `${event.tool}-${event.step || 0}`;
-          streamingState.set(key, {
+          streamingToolState.set(key, {
             toolName: event.tool || 'unknown',
             argsText: JSON.stringify(event.args || {}, null, 2),
             args: event.args || {},
@@ -153,118 +170,79 @@ export const AssistantUIMessage: React.FC<AssistantUIMessageProps> = ({
           const blockContent = event.block.content as any;
           const toolName = blockContent.tool_name || 'unknown';
           const toolNameLower = toolName.toLowerCase();
-          // Remove streaming version when we get the persisted block (case-insensitive)
-          for (const [k] of streamingState) {
+          for (const [k] of streamingToolState) {
             if (k.toLowerCase().startsWith(toolNameLower + '-')) {
-              streamingState.delete(k);
+              streamingToolState.delete(k);
               break;
             }
           }
-        } else if (event.type === 'tool_result_block' && event.block) {
-          // Results will be handled via toolBlocks
         }
       }
     }
 
-    // Step 2: Build tool calls from persisted blocks (sorted by sequence_number)
-    const toolCallsById = new Map<string, any>();
+    // Step 2: Build tool results map
     const toolResultsById = new Map<string, ContentBlock>();
-
-    if (toolBlocks.length > 0) {
-      // First pass: collect all results
-      for (const block of toolBlocks) {
-        if (block.block_type === 'tool_result' && block.parent_block_id) {
-          toolResultsById.set(block.parent_block_id, block);
-        }
-      }
-
-      // Second pass: build tool calls with their results
-      for (const block of toolBlocks) {
-        if (block.block_type === 'tool_call') {
-          const callContent = block.content as any;
-          const result = toolResultsById.get(block.id);
-          const resultContent = result?.content as any;
-          const resultMetadata = result?.block_metadata as any;
-
-          // Build result object that includes binary data if present
-          let resultValue: any = resultContent?.result || resultContent?.error;
-
-          // Check for binary data in content OR metadata (backend stores it in metadata)
-          const isBinary = resultContent?.is_binary || resultMetadata?.is_binary;
-          const binaryData = resultContent?.binary_data || resultMetadata?.image_data;
-          const binaryType = resultContent?.binary_type || resultMetadata?.type;
-
-          if (isBinary && binaryData) {
-            resultValue = {
-              is_binary: true,
-              type: 'image',
-              image_data: binaryData,
-              binary_type: binaryType,
-              text: resultContent?.result || '',
-            };
-          }
-
-          toolCallsById.set(block.id, {
-            toolCallId: block.id,
-            toolName: callContent.tool_name || 'unknown',
-            args: callContent.arguments || {},
-            argsText: JSON.stringify(callContent.arguments || {}, null, 2),
-            result: resultValue,
-            isError: resultContent ? !resultContent.success : false,
-            status: { type: result ? 'complete' : 'running' } as ToolCallMessagePartStatus,
-            sequenceNumber: block.sequence_number,
-            addResult: () => {},
-            resume: () => {},
-          });
-        }
+    for (const b of toolBlocks) {
+      if (b.block_type === 'tool_result' && b.parent_block_id) {
+        toolResultsById.set(b.parent_block_id, b);
       }
     }
 
-    // Step 3: Determine the correct order of text and tools
-    // ReAct pattern: Thought (text) → Action (tool) → Observation (result)
-    // So text typically comes BEFORE tools, unless the text block was CREATED after tools
-    const fullText = textContent + streamingText;
-    const textPart = fullText ? {
-      type: 'text',
-      content: fullText,
-      isStreaming: isStreaming && (streamingText.length > 0 || streamEvents.length > 0),
-    } : (isStreaming ? { type: 'text', content: '', isStreaming: true } : null);
+    // Step 3: Create a unified list of all parts with sequence numbers
+    interface SequencedPart {
+      type: 'text' | 'tool-call';
+      sequenceNumber: number;
+      data: any;
+    }
+    const sequencedParts: SequencedPart[] = [];
 
-    // Use created_at (not updated_at) to determine ordering
-    // Text was created when the assistant started responding
-    const textBlockCreatedAt = new Date(block.created_at).getTime();
-    const toolCallBlocks = toolBlocks.filter(b => b.block_type === 'tool_call');
-    const firstToolCallTime = toolCallBlocks.length > 0
-      ? Math.min(...toolCallBlocks.map(b => new Date(b.created_at).getTime()))
-      : Infinity;
+    // Add text blocks as parts
+    const assistantTextBlocks = allTextBlocks.filter(
+      b => b.block_type === 'assistant_text' || b.block_type === 'system'
+    );
 
-    // Text comes after tools ONLY if the text block was UPDATED AFTER the last tool call completed
-    // This handles the case where a summary text is appended after tools finish
-    const lastToolCallTime = toolCallBlocks.length > 0
-      ? Math.max(...toolCallBlocks.map(b => new Date(b.updated_at || b.created_at).getTime()))
-      : 0;
+    for (const textBlock of assistantTextBlocks) {
+      const text = textBlock.content?.text || '';
+      // Always add text blocks - even if empty during streaming, the streaming text will be appended
+      sequencedParts.push({
+        type: 'text',
+        sequenceNumber: textBlock.sequence_number,
+        data: {
+          blockId: textBlock.id,
+          content: text,
+          isStreaming: false, // Will be updated for the last block if streaming
+        },
+      });
+    }
 
-    // Use updated_at for text block to detect when summary was added
-    const textBlockUpdatedAt = new Date(block.updated_at || block.created_at).getTime();
+    // Add tool calls as parts
+    for (const b of toolBlocks) {
+      if (b.block_type === 'tool_call') {
+        const callContent = b.content as any;
+        const result = toolResultsById.get(b.id);
+        const resultContent = result?.content as any;
+        const resultMetadata = result?.block_metadata as any;
 
-    // Text comes after tools if the text block was updated after all tool calls
-    textAfterTools = textBlockUpdatedAt > lastToolCallTime
-      && lastToolCallTime > 0
-      && fullText.length > 0
-      && !isStreaming;  // During streaming, keep current order
+        let resultValue: any = resultContent?.result || resultContent?.error;
+        const isBinary = resultContent?.is_binary || resultMetadata?.is_binary;
+        const binaryData = resultContent?.binary_data || resultMetadata?.image_data;
+        const binaryType = resultContent?.binary_type || resultMetadata?.type;
 
-    // Sort persisted tools by sequence_number
-    const sortedPersistedTools = Array.from(toolCallsById.values())
-      .sort((a, b) => a.sequenceNumber - b.sequenceNumber);
+        if (isBinary && binaryData) {
+          resultValue = {
+            is_binary: true,
+            type: 'image',
+            image_data: binaryData,
+            binary_type: binaryType,
+            text: resultContent?.result || '',
+          };
+        }
 
-    // Helper function to add tool parts
-    const addToolParts = () => {
-      for (const tool of sortedPersistedTools) {
-        // Check if there's a streaming version with more recent state (case-insensitive)
-        const toolNameLower = tool.toolName.toLowerCase();
+        // Check for streaming version
+        const toolNameLower = (callContent.tool_name || '').toLowerCase();
         let streamingVersion = null;
         let streamingKey = null;
-        for (const [key, state] of streamingState) {
+        for (const [key, state] of streamingToolState) {
           if (key.toLowerCase().startsWith(toolNameLower + '-')) {
             streamingVersion = state;
             streamingKey = key;
@@ -272,33 +250,95 @@ export const AssistantUIMessage: React.FC<AssistantUIMessageProps> = ({
           }
         }
 
-        if (streamingVersion && !tool.result) {
-          // Tool is still streaming - use streaming state for args
-          parts.push({
+        if (streamingVersion && !result) {
+          sequencedParts.push({
             type: 'tool-call',
-            toolCallId: tool.toolCallId,
-            toolName: tool.toolName,
-            args: streamingVersion.args,
-            argsText: streamingVersion.argsText,
-            status: { type: streamingVersion.status === 'running' ? 'running' : 'running' },
-            addResult: () => {},
-            resume: () => {},
+            sequenceNumber: b.sequence_number,
+            data: {
+              toolCallId: b.id,
+              toolName: callContent.tool_name || 'unknown',
+              args: streamingVersion.args,
+              argsText: streamingVersion.argsText,
+              status: { type: 'running' } as ToolCallMessagePartStatus,
+              addResult: () => {},
+              resume: () => {},
+            },
           });
-          // Remove from streaming state since we've used it
-          if (streamingKey) {
-            streamingState.delete(streamingKey);
-          }
+          if (streamingKey) streamingToolState.delete(streamingKey);
         } else {
-          // Use persisted state
-          const { sequenceNumber, ...rest } = tool;
-          parts.push({ type: 'tool-call', ...rest });
+          sequencedParts.push({
+            type: 'tool-call',
+            sequenceNumber: b.sequence_number,
+            data: {
+              toolCallId: b.id,
+              toolName: callContent.tool_name || 'unknown',
+              args: callContent.arguments || {},
+              argsText: JSON.stringify(callContent.arguments || {}, null, 2),
+              result: resultValue,
+              isError: resultContent ? !resultContent.success : false,
+              status: { type: result ? 'complete' : 'running' } as ToolCallMessagePartStatus,
+              addResult: () => {},
+              resume: () => {},
+            },
+          });
         }
       }
+    }
 
-      // Add any remaining streaming-only tools (not yet persisted)
-      for (const [key, state] of streamingState) {
-        parts.push({
-          type: 'tool-call',
+    // Step 4: Sort all parts by sequence_number
+    sequencedParts.sort((a, b) => a.sequenceNumber - b.sequenceNumber);
+
+    // Step 5: Handle streaming text - append to the last text block or create new
+    if (isStreaming && streamingText) {
+      // Find the last text part and append streaming text to it
+      const lastTextPartIndex = sequencedParts.map(p => p.type).lastIndexOf('text');
+      if (lastTextPartIndex >= 0) {
+        sequencedParts[lastTextPartIndex].data.content += streamingText;
+        sequencedParts[lastTextPartIndex].data.isStreaming = true;
+      } else if (sequencedParts.length === 0) {
+        // No parts yet, create a streaming text part
+        sequencedParts.push({
+          type: 'text',
+          sequenceNumber: 0,
+          data: {
+            blockId: 'streaming',
+            content: streamingText,
+            isStreaming: true,
+          },
+        });
+      }
+    } else if (isStreaming && sequencedParts.length === 0) {
+      // Streaming but no content yet - show empty streaming indicator
+      sequencedParts.push({
+        type: 'text',
+        sequenceNumber: 0,
+        data: {
+          blockId: 'streaming',
+          content: '',
+          isStreaming: true,
+        },
+      });
+    }
+
+    // Mark the last text block as streaming if we're still streaming
+    if (isStreaming && streamEvents.length > 0) {
+      const lastTextPartIndex = sequencedParts.map(p => p.type).lastIndexOf('text');
+      if (lastTextPartIndex >= 0) {
+        sequencedParts[lastTextPartIndex].data.isStreaming = true;
+      }
+    }
+
+    // Step 6: Add any remaining streaming-only tools (not yet persisted)
+    const maxSeq = sequencedParts.length > 0
+      ? Math.max(...sequencedParts.map(p => p.sequenceNumber))
+      : 0;
+
+    let streamingSeq = maxSeq + 1;
+    for (const [key, state] of streamingToolState) {
+      sequencedParts.push({
+        type: 'tool-call',
+        sequenceNumber: streamingSeq++,
+        data: {
           toolCallId: `streaming-${key}`,
           toolName: state.toolName,
           args: state.args,
@@ -308,19 +348,24 @@ export const AssistantUIMessage: React.FC<AssistantUIMessageProps> = ({
           status: { type: state.status === 'complete' ? 'complete' : 'running' } as ToolCallMessagePartStatus,
           addResult: () => {},
           resume: () => {},
+        },
+      });
+    }
+
+    // Step 7: Convert to final parts format
+    for (const sp of sequencedParts) {
+      if (sp.type === 'text') {
+        parts.push({
+          type: 'text',
+          content: sp.data.content,
+          isStreaming: sp.data.isStreaming,
+        });
+      } else {
+        parts.push({
+          type: 'tool-call',
+          ...sp.data,
         });
       }
-    };
-
-    // Step 4: Add parts in the correct order based on timestamps
-    if (textAfterTools) {
-      // Tools first, then text (text is a summary after tool execution)
-      addToolParts();
-      if (textPart) parts.push(textPart);
-    } else {
-      // Text first, then tools (normal flow or streaming)
-      if (textPart) parts.push(textPart);
-      addToolParts();
     }
 
     // Extract streaming-only tool parts for step grouping
@@ -328,8 +373,8 @@ export const AssistantUIMessage: React.FC<AssistantUIMessageProps> = ({
       p.type === 'tool-call' && p.toolCallId?.startsWith('streaming-')
     );
 
-    return { messageParts: parts, showTextAfterTools: textAfterTools, streamingToolParts };
-  }, [block.id, block.created_at, block.updated_at, toolBlocks, isStreaming, streamEvents, textContent]);
+    return { messageParts: parts, streamingToolParts };
+  }, [block.id, block.sequence_number, allTextBlocks, toolBlocks, isStreaming, streamEvents, role, userTextContent]);
 
   // Count tool call parts for determining if we should use step grouping
   const toolCallCount = useMemo(() => {
@@ -404,13 +449,6 @@ export const AssistantUIMessage: React.FC<AssistantUIMessageProps> = ({
     return null;
   };
 
-  // Render text parts only (for step grouping mode)
-  const renderTextParts = () => {
-    return messageParts
-      .filter(part => part.type === 'text')
-      .map((part, index) => renderPart(part, index));
-  };
-
   return (
     <div className={`message-wrapper ${role}`}>
       <div className="message-content">
@@ -424,29 +462,22 @@ export const AssistantUIMessage: React.FC<AssistantUIMessageProps> = ({
         <div className="message-text">
           <div className="message-body">
             {useStepGrouping ? (
-              showTextAfterTools ? (
-                <>
-                  {/* Tools first, then text (summary after tool execution) */}
-                  <ToolStepGroup
-                    toolBlocks={toolBlocks}
-                    streamingTools={streamingToolParts}
-                    isStreaming={isStreaming}
-                  />
-                  {renderTextParts()}
-                </>
-              ) : (
-                <>
-                  {/* Text first, then tools (normal flow) */}
-                  {renderTextParts()}
-                  <ToolStepGroup
-                    toolBlocks={toolBlocks}
-                    streamingTools={streamingToolParts}
-                    isStreaming={isStreaming}
-                  />
-                </>
-              )
+              <>
+                {/* With step grouping: render text parts inline, tools grouped */}
+                {messageParts.map((part, index) => {
+                  if (part.type === 'text') {
+                    return renderPart(part, index);
+                  }
+                  return null;
+                })}
+                <ToolStepGroup
+                  toolBlocks={toolBlocks}
+                  streamingTools={streamingToolParts}
+                  isStreaming={isStreaming}
+                />
+              </>
             ) : (
-              /* Render all parts inline (text + individual tools) */
+              /* Render all parts inline in sequence order (text + individual tools) */
               messageParts.map((part, index) => renderPart(part, index))
             )}
           </div>

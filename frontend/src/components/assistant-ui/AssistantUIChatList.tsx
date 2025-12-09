@@ -45,11 +45,13 @@ const MemoizedAssistantUIMessage = AssistantUIMessage;
 /**
  * Group content blocks into display groups:
  * - user_text blocks become individual items
- * - assistant_text blocks with their associated tool_call and tool_result blocks become a single group
+ * - ALL consecutive assistant content (multiple assistant_text + tool blocks) between user messages
+ *   become a single group. This supports multiple text blocks per response.
  */
 interface DisplayGroup {
   type: 'user' | 'assistant';
   mainBlock: ContentBlock;
+  textBlocks: ContentBlock[];  // All assistant_text blocks in this response (for multi-block support)
   toolBlocks: ContentBlock[];  // tool_call and tool_result blocks associated with this assistant response
 }
 
@@ -70,19 +72,23 @@ function groupBlocks(blocks: ContentBlock[]): DisplayGroup[] {
       groups.push({
         type: 'user',
         mainBlock: block,
+        textBlocks: [],
         toolBlocks: [],
       });
     } else if (block.block_type === 'assistant_text') {
-      // Flush any pending assistant group
+      // With multiple text blocks, we ADD to existing group instead of creating new
       if (currentAssistantGroup) {
-        groups.push(currentAssistantGroup);
+        // Add this text block to the existing group
+        currentAssistantGroup.textBlocks.push(block);
+      } else {
+        // Start new assistant group with this text block
+        currentAssistantGroup = {
+          type: 'assistant',
+          mainBlock: block,
+          textBlocks: [block],
+          toolBlocks: [],
+        };
       }
-      // Start new assistant group
-      currentAssistantGroup = {
-        type: 'assistant',
-        mainBlock: block,
-        toolBlocks: [],
-      };
     } else if (block.block_type === 'tool_call' || block.block_type === 'tool_result') {
       // Add to current assistant group if exists
       if (currentAssistantGroup) {
@@ -102,6 +108,7 @@ function groupBlocks(blocks: ContentBlock[]): DisplayGroup[] {
             created_at: block.created_at,
             updated_at: block.updated_at,
           },
+          textBlocks: [],
           toolBlocks: [block],
         };
       }
@@ -114,6 +121,7 @@ function groupBlocks(blocks: ContentBlock[]): DisplayGroup[] {
       groups.push({
         type: 'assistant',
         mainBlock: block,
+        textBlocks: [block],
         toolBlocks: [],
       });
     }
@@ -135,9 +143,7 @@ export const AssistantUIChatList: React.FC<AssistantUIChatListProps> = ({
   const virtuosoRef = useRef<VirtuosoHandle>(null);
 
   // Group blocks into display units
-  const displayGroups = useMemo(() => {
-    return groupBlocks(blocks);
-  }, [blocks]);
+  const displayGroups = useMemo(() => groupBlocks(blocks), [blocks]);
 
   // followOutput as a function - Virtuoso calls this when new items are added
   // Returns 'smooth' to auto-scroll, or false to stay in place
@@ -167,6 +173,7 @@ export const AssistantUIChatList: React.FC<AssistantUIChatListProps> = ({
             <MemoizedAssistantUIMessage
               key={group.mainBlock.id}
               block={group.mainBlock}
+              textBlocks={group.textBlocks}
               toolBlocks={group.toolBlocks}
               isStreaming={isCurrentlyStreaming}
               streamEvents={isCurrentlyStreaming ? streamEvents : []}
