@@ -138,6 +138,8 @@ async def reset_sandbox(
                 detail="Sandbox not found or not running",
             )
 
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -208,6 +210,8 @@ async def execute_command(
             stderr=stderr,
         )
 
+    except HTTPException:
+        raise
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
