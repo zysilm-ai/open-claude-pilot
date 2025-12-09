@@ -156,6 +156,7 @@ export const filesAPI = {
 
 // Workspace Files API (for chat session file sidebar)
 export interface WorkspaceFile {
+  id?: string;  // File ID (only for uploaded files from database)
   name: string;
   path: string;
   size: number;
@@ -200,6 +201,15 @@ export const workspaceAPI = {
     const { data } = await api.get(`/chats/${sessionId}/workspace/download-all`, {
       params: { type },
       responseType: 'blob',
+    });
+    return data;
+  },
+
+  // Upload a workspace file to the project (makes it available to other sessions)
+  uploadToProject: async (sessionId: string, path: string, projectId: string): Promise<any> => {
+    const { data } = await api.post(`/chats/${sessionId}/workspace/files/upload-to-project`, {
+      path,
+      project_id: projectId,
     });
     return data;
   },

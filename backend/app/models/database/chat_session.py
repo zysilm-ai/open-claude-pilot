@@ -24,6 +24,7 @@ class ChatSession(Base):
     project_id = Column(String(36), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
     name = Column(String(255), nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
     container_id = Column(String(100), nullable=True)  # Docker container ID
     status = Column(Enum(ChatSessionStatus), default=ChatSessionStatus.ACTIVE, nullable=False)
     title_auto_generated = Column(String(1), default="N", nullable=False)  # Y/N flag

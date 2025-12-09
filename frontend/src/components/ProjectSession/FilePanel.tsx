@@ -1,6 +1,7 @@
-import { useRef } from 'react';
+import { useCallback } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { filesAPI } from '@/services/api';
+import { FileDropZone } from '@/components/common';
 import './FilePanel.css';
 
 interface FilePanelProps {
@@ -9,7 +10,6 @@ interface FilePanelProps {
 
 export default function FilePanel({ projectId }: FilePanelProps) {
   const queryClient = useQueryClient();
-  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Fetch files
   const { data: filesData, isLoading } = useQuery({
@@ -22,9 +22,6 @@ export default function FilePanel({ projectId }: FilePanelProps) {
     mutationFn: (file: File) => filesAPI.upload(projectId, file),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['files', projectId] });
-      if (fileInputRef.current) {
-        fileInputRef.current.value = '';
-      }
     },
   });
 
@@ -36,16 +33,9 @@ export default function FilePanel({ projectId }: FilePanelProps) {
     },
   });
 
-  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      uploadMutation.mutate(file);
-    }
-  };
-
-  const handleUploadClick = () => {
-    fileInputRef.current?.click();
-  };
+  const handleUpload = useCallback(async (file: File) => {
+    await uploadMutation.mutateAsync(file);
+  }, [uploadMutation]);
 
   const handleDelete = (fileId: string) => {
     if (confirm('Delete this file?')) {
@@ -79,19 +69,11 @@ export default function FilePanel({ projectId }: FilePanelProps) {
 
   return (
     <div className="file-panel">
-      <div className="file-panel-header">
-        <button
-          className="upload-btn"
-          onClick={handleUploadClick}
-          disabled={uploadMutation.isPending}
-        >
-          {uploadMutation.isPending ? 'Uploading...' : '+ Upload'}
-        </button>
-        <input
-          ref={fileInputRef}
-          type="file"
-          style={{ display: 'none' }}
-          onChange={handleFileSelect}
+      <div className="file-panel-upload">
+        <FileDropZone
+          onUpload={handleUpload}
+          isUploading={uploadMutation.isPending}
+          compact
         />
       </div>
 
@@ -100,7 +82,7 @@ export default function FilePanel({ projectId }: FilePanelProps) {
 
         {files.length === 0 && !isLoading && (
           <div className="file-list-empty">
-            No files uploaded yet. Upload files to share with the agent.
+            No files uploaded yet
           </div>
         )}
 

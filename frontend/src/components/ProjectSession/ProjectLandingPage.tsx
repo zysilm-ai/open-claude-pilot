@@ -157,7 +157,7 @@ export default function ProjectLandingPage() {
                       })}
                     </span>
                   </div>
-                  {session.updated_at !== session.created_at && (
+                  {session.updated_at && session.updated_at !== session.created_at && (
                     <p className="session-updated">
                       Last updated: {new Date(session.updated_at).toLocaleString('en-US', {
                         month: 'short',

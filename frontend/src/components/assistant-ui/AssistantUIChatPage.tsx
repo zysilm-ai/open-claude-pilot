@@ -211,6 +211,7 @@ export default function AssistantUIChatPage() {
         {/* File Sidebar */}
         <ChatFileSidebar
           sessionId={sessionId!}
+          projectId={projectId!}
           isOpen={sidebarOpen}
           onClose={() => setSidebarOpen(false)}
         />

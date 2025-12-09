@@ -3,14 +3,16 @@
  *
  * Displays uploaded files and output files from the sandbox workspace.
  * Features:
+ * - Drag-and-drop file upload
  * - Collapsible sections for uploaded/output files
  * - File preview with viewer mode
  * - Download individual files or all as zip
  * - Real-time updates when LLM creates new files
  */
-import { useState, useCallback, useEffect } from 'react';
-import { useQuery } from '@tanstack/react-query';
-import { workspaceAPI, WorkspaceFile, WorkspaceFileContent } from '@/services/api';
+import { useState, useCallback, useEffect, useRef } from 'react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { workspaceAPI, filesAPI, WorkspaceFile, WorkspaceFileContent } from '@/services/api';
+import { FileDropZone } from '@/components/common';
 import {
   ChevronDown,
   ChevronRight,
@@ -23,11 +25,18 @@ import {
   FolderOpen,
   Package,
   X,
+  Upload,
+  Check,
+  Trash2,
 } from 'lucide-react';
 import './ChatFileSidebar.css';
 
+// Local storage key for sidebar width
+const SIDEBAR_WIDTH_KEY = 'chatFileSidebarWidth';
+
 interface ChatFileSidebarProps {
   sessionId: string;
+  projectId: string;
   isOpen: boolean;
   onClose: () => void;
   onFileUpdate?: () => void;
@@ -37,14 +46,93 @@ type ViewMode = 'list' | 'file';
 
 export default function ChatFileSidebar({
   sessionId,
+  projectId,
   isOpen,
   onClose,
   onFileUpdate,
 }: ChatFileSidebarProps) {
+  const queryClient = useQueryClient();
   const [viewMode, setViewMode] = useState<ViewMode>('list');
   const [selectedFile, setSelectedFile] = useState<WorkspaceFile | null>(null);
   const [uploadedExpanded, setUploadedExpanded] = useState(true);
   const [outputExpanded, setOutputExpanded] = useState(true);
+
+  // Resize state
+  const sidebarRef = useRef<HTMLDivElement>(null);
+  const [isResizing, setIsResizing] = useState(false);
+  const [sidebarWidth, setSidebarWidth] = useState<number>(() => {
+    const saved = localStorage.getItem(SIDEBAR_WIDTH_KEY);
+    return saved ? parseInt(saved, 10) : 25; // Default to 1/4
+  });
+
+  // Close animation state
+  const [isClosing, setIsClosing] = useState(false);
+  const [shouldRender, setShouldRender] = useState(isOpen);
+
+  // Handle open/close with animation
+  useEffect(() => {
+    if (isOpen) {
+      setShouldRender(true);
+      setIsClosing(false);
+    } else if (shouldRender) {
+      // Start closing animation
+      setIsClosing(true);
+      const timer = setTimeout(() => {
+        setShouldRender(false);
+        setIsClosing(false);
+      }, 200); // Match animation duration
+      return () => clearTimeout(timer);
+    }
+  }, [isOpen, shouldRender]);
+
+  // Handle close with animation
+  const handleClose = useCallback(() => {
+    setIsClosing(true);
+    setTimeout(() => {
+      onClose();
+    }, 200);
+  }, [onClose]);
+
+  // Resize handlers
+  const handleMouseDown = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    setIsResizing(true);
+  }, []);
+
+  useEffect(() => {
+    if (!isResizing) return;
+
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!sidebarRef.current) return;
+
+      const containerWidth = window.innerWidth;
+      const newWidth = ((containerWidth - e.clientX) / containerWidth) * 100;
+
+      // Clamp between min and max (20% to 50%)
+      const clampedWidth = Math.min(Math.max(newWidth, 20), 50);
+      setSidebarWidth(clampedWidth);
+    };
+
+    const handleMouseUp = () => {
+      setIsResizing(false);
+      // Save to localStorage
+      localStorage.setItem(SIDEBAR_WIDTH_KEY, sidebarWidth.toString());
+    };
+
+    document.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('mouseup', handleMouseUp);
+
+    // Prevent text selection while resizing
+    document.body.style.userSelect = 'none';
+    document.body.style.cursor = 'col-resize';
+
+    return () => {
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+      document.body.style.userSelect = '';
+      document.body.style.cursor = '';
+    };
+  }, [isResizing, sidebarWidth]);
 
   // Fetch workspace files
   const {
@@ -59,6 +147,65 @@ export default function ChatFileSidebar({
     staleTime: 30000, // 30 seconds
     retry: 1,
   });
+
+  // Upload mutation (for drag-drop file upload)
+  const uploadMutation = useMutation({
+    mutationFn: (file: File) => filesAPI.upload(projectId, file),
+    onSuccess: () => {
+      // Invalidate both project files and workspace files
+      queryClient.invalidateQueries({ queryKey: ['files', projectId] });
+      queryClient.invalidateQueries({ queryKey: ['workspaceFiles', sessionId] });
+    },
+  });
+
+  const handleUpload = useCallback(async (file: File) => {
+    await uploadMutation.mutateAsync(file);
+  }, [uploadMutation]);
+
+  // Upload to project mutation (for output files)
+  const [uploadedToProject, setUploadedToProject] = useState<Set<string>>(new Set());
+  const uploadToProjectMutation = useMutation({
+    mutationFn: (path: string) => workspaceAPI.uploadToProject(sessionId, path, projectId),
+    onSuccess: (_data, path) => {
+      // Mark file as uploaded
+      setUploadedToProject(prev => new Set(prev).add(path));
+      // Invalidate project files so other sessions can see the file
+      queryClient.invalidateQueries({ queryKey: ['files', projectId] });
+      // Invalidate workspace files to refresh the "Uploaded Files" section
+      queryClient.invalidateQueries({ queryKey: ['workspaceFiles', sessionId] });
+    },
+  });
+
+  const handleUploadToProject = useCallback(async (file: WorkspaceFile, e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    if (uploadedToProject.has(file.path)) return; // Already uploaded
+    try {
+      await uploadToProjectMutation.mutateAsync(file.path);
+    } catch (err) {
+      console.error('Upload to project failed:', err);
+    }
+  }, [uploadToProjectMutation, uploadedToProject]);
+
+  // Delete file mutation (for uploaded files)
+  const deleteFileMutation = useMutation({
+    mutationFn: (fileId: string) => filesAPI.delete(fileId),
+    onSuccess: () => {
+      // Invalidate queries to refresh file lists
+      queryClient.invalidateQueries({ queryKey: ['files', projectId] });
+      queryClient.invalidateQueries({ queryKey: ['workspaceFiles', sessionId] });
+    },
+  });
+
+  const handleDeleteFile = useCallback(async (file: WorkspaceFile, e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    if (!file.id) return; // Can only delete files with IDs (uploaded files)
+    if (!confirm(`Delete "${file.name}"? This will remove it from the project.`)) return;
+    try {
+      await deleteFileMutation.mutateAsync(file.id);
+    } catch (err) {
+      console.error('Delete file failed:', err);
+    }
+  }, [deleteFileMutation]);
 
   // Fetch selected file content
   const {
@@ -164,19 +311,29 @@ export default function ChatFileSidebar({
     );
   };
 
-  if (!isOpen) return null;
+  if (!shouldRender) return null;
 
   const uploadedFiles = filesData?.uploaded || [];
   const outputFiles = filesData?.output || [];
 
   return (
-    <div className="chat-file-sidebar">
+    <div
+      ref={sidebarRef}
+      className={`chat-file-sidebar ${isClosing ? 'closing' : ''}`}
+      style={{ width: `${sidebarWidth}%` }}
+    >
+      {/* Resize handle */}
+      <div
+        className={`sidebar-resize-handle ${isResizing ? 'resizing' : ''}`}
+        onMouseDown={handleMouseDown}
+      />
+
       {/* Header */}
       <div className="sidebar-header">
         {viewMode === 'list' ? (
           <>
             <h3>Files</h3>
-            <button className="sidebar-close-btn" onClick={onClose} title="Close sidebar">
+            <button className="sidebar-close-btn" onClick={handleClose} title="Close sidebar">
               <X size={18} />
             </button>
           </>
@@ -186,7 +343,7 @@ export default function ChatFileSidebar({
               <ArrowLeft size={16} />
               Back
             </button>
-            <button className="sidebar-close-btn" onClick={onClose} title="Close sidebar">
+            <button className="sidebar-close-btn" onClick={handleClose} title="Close sidebar">
               <X size={18} />
             </button>
           </>
@@ -209,6 +366,15 @@ export default function ChatFileSidebar({
 
             {!isLoading && !error && (
               <>
+                {/* Upload Drop Zone */}
+                <div className="sidebar-upload-section">
+                  <FileDropZone
+                    onUpload={handleUpload}
+                    isUploading={uploadMutation.isPending}
+                    compact
+                  />
+                </div>
+
                 {/* Uploaded Files Section */}
                 <div className="file-section">
                   <button
@@ -255,6 +421,16 @@ export default function ChatFileSidebar({
                             >
                               <Download size={14} />
                             </button>
+                            {file.id && (
+                              <button
+                                className="file-delete-btn"
+                                onClick={(e) => handleDeleteFile(file, e)}
+                                title="Delete from project"
+                                disabled={deleteFileMutation.isPending}
+                              >
+                                <Trash2 size={14} />
+                              </button>
+                            )}
                           </div>
                         ))
                       )}
@@ -290,26 +466,39 @@ export default function ChatFileSidebar({
                       {outputFiles.length === 0 ? (
                         <div className="file-list-empty">No output files yet</div>
                       ) : (
-                        outputFiles.map((file) => (
-                          <div
-                            key={file.path}
-                            className="file-item"
-                            onClick={() => handleFileClick(file)}
-                          >
-                            <div className="file-icon">{getFileIcon(file)}</div>
-                            <div className="file-info">
-                              <div className="file-name">{file.name}</div>
-                              <div className="file-size">{formatFileSize(file.size)}</div>
-                            </div>
-                            <button
-                              className="file-download-btn"
-                              onClick={(e) => handleDownloadFile(file, e)}
-                              title="Download"
+                        outputFiles.map((file) => {
+                          const isUploaded = uploadedToProject.has(file.path);
+                          const isUploading = uploadToProjectMutation.isPending &&
+                            uploadToProjectMutation.variables === file.path;
+                          return (
+                            <div
+                              key={file.path}
+                              className="file-item"
+                              onClick={() => handleFileClick(file)}
                             >
-                              <Download size={14} />
-                            </button>
-                          </div>
-                        ))
+                              <div className="file-icon">{getFileIcon(file)}</div>
+                              <div className="file-info">
+                                <div className="file-name">{file.name}</div>
+                                <div className="file-size">{formatFileSize(file.size)}</div>
+                              </div>
+                              <button
+                                className={`file-upload-btn ${isUploaded ? 'uploaded' : ''}`}
+                                onClick={(e) => handleUploadToProject(file, e)}
+                                title={isUploaded ? 'Added to project' : 'Add to project files'}
+                                disabled={isUploaded || isUploading}
+                              >
+                                {isUploaded ? <Check size={14} /> : <Upload size={14} />}
+                              </button>
+                              <button
+                                className="file-download-btn"
+                                onClick={(e) => handleDownloadFile(file, e)}
+                                title="Download"
+                              >
+                                <Download size={14} />
+                              </button>
+                            </div>
+                          );
+                        })
                       )}
                     </div>
                   )}

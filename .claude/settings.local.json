@@ -96,7 +96,8 @@
       "Bash(for db in /Users/ziyang/Documents/open-codex-gui/backend/*.db /Users/ziyang/Documents/open-codex-gui/backend/data/*.db)",
       "Bash(do)",
       "Bash(echo:*)",
-      "Bash(done)"
+      "Bash(done)",
+      "Bash(npx vite build:*)"
     ],
     "deny": [],
     "ask": []

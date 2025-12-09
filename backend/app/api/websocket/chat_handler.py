@@ -704,6 +704,7 @@ class ChatWebSocketHandler:
                 # Container not running, recreate it
                 container = await container_manager.create_container(
                     session_id,
+                    session.project_id,
                     session.environment_type,
                     session.environment_config or {}
                 )
@@ -755,11 +756,13 @@ class ChatWebSocketHandler:
         self.cancel_event = asyncio.Event()
 
         # Track state
-        assistant_content = ""
+        assistant_content = ""  # Content for current text block only
         has_error = False
         error_message = None
         cancelled = False
         current_tool_call_block: Optional[ContentBlock] = None  # Track current tool call block
+        current_text_block: ContentBlock = assistant_block  # Track current text block (initially the first one)
+        text_block_has_content = False  # Track if current text block has any content
 
         # Batching for performance: only commit every N chunks or when action completes
         chunks_since_commit = 0
@@ -886,6 +889,33 @@ class ChatWebSocketHandler:
                     tool_args = event.get("args", {})
                     print(f"[AGENT] Action: {tool_name}")
                     print(f"  Args: {tool_args}")
+
+                    # MULTIPLE TEXT BLOCKS: Finalize current text block BEFORE creating tool_call
+                    # This ensures text appears before the tool call in sequence order
+                    if text_block_has_content and current_text_block:
+                        # Finalize the current text block
+                        current_text_block.content = {"text": assistant_content}
+                        current_text_block.block_metadata = {
+                            **current_text_block.block_metadata,
+                            "streaming": False
+                        }
+                        await self._safe_commit()
+                        print(f"[AGENT] Finalized text block {current_text_block.id} with {len(assistant_content)} chars before tool call")
+
+                        # Send assistant_text_end for this block (intermediate - not final)
+                        try:
+                            await self.websocket.send_json({
+                                "type": "assistant_text_end",
+                                "block_id": current_text_block.id,
+                                "is_final": False  # Indicates more content may follow
+                            })
+                        except:
+                            print(f"[AGENT] WebSocket disconnected during assistant_text_end")
+
+                        # Mark that we need a new text block after the tool completes
+                        current_text_block = None
+                        text_block_has_content = False
+                        assistant_content = ""
 
                     # Update tool state to "running" (tool block created, now executing)
                     if session_id in _stream_states:
@@ -1022,9 +1052,40 @@ class ChatWebSocketHandler:
                     current_tool_call_block = None
 
                 elif event_type == "chunk":
-                    # Agent is streaming final answer chunks
+                    # Agent is streaming text chunks
                     chunk = event.get("content", "")
+
+                    # MULTIPLE TEXT BLOCKS: Create new text block if needed (after tool completion)
+                    if current_text_block is None:
+                        current_text_block = await self._create_content_block(
+                            session_id=session_id,
+                            block_type=ContentBlockType.ASSISTANT_TEXT,
+                            author=ContentBlockAuthor.ASSISTANT,
+                            content={"text": ""},
+                            metadata={"streaming": True, "agent_mode": True}
+                        )
+                        assistant_content = ""  # Reset content for new block
+                        text_block_has_content = False
+                        print(f"[AGENT] Created NEW text block {current_text_block.id} (seq: {current_text_block.sequence_number}) after tool")
+
+                        # Update stream state for reconnection
+                        if session_id in _stream_states:
+                            _stream_states[session_id].block_id = current_text_block.id
+                            _stream_states[session_id].accumulated_content = ""
+                            _stream_states[session_id].sequence_number = current_text_block.sequence_number
+
+                        # Send assistant_text_start for new block
+                        try:
+                            await self.websocket.send_json({
+                                "type": "assistant_text_start",
+                                "block_id": current_text_block.id,
+                                "sequence_number": current_text_block.sequence_number
+                            })
+                        except:
+                            print(f"[AGENT] WebSocket disconnected during assistant_text_start")
+
                     assistant_content += chunk
+                    text_block_has_content = True
                     chunks_since_commit += 1
 
                     # Update streaming manager activity
@@ -1038,7 +1099,7 @@ class ChatWebSocketHandler:
                     chunk_data = {
                         "type": "chunk",
                         "content": chunk,
-                        "block_id": assistant_block.id  # Include block_id for frontend tracking
+                        "block_id": current_text_block.id  # Use current text block ID
                     }
 
                     # Legacy buffer (for backward compatibility)
@@ -1053,16 +1114,41 @@ class ChatWebSocketHandler:
                         print(f"[AGENT] WebSocket disconnected during chunk, continuing...")
 
                     # Batched commit: only commit periodically
-                    assistant_block.content = {"text": assistant_content}
-                    if chunks_since_commit >= CHUNK_COMMIT_INTERVAL:
-                        await self._safe_commit()
-                        chunks_since_commit = 0
-                        print(f"[AGENT] Committed content update ({len(assistant_content)} chars)")
+                    if current_text_block:
+                        current_text_block.content = {"text": assistant_content}
+                        if chunks_since_commit >= CHUNK_COMMIT_INTERVAL:
+                            await self._safe_commit()
+                            chunks_since_commit = 0
+                            print(f"[AGENT] Committed content update ({len(assistant_content)} chars)")
 
                 elif event_type == "final_answer":
                     # Agent has completed the task (legacy - now using chunks)
                     answer = event.get("content", "")
+
+                    # MULTIPLE TEXT BLOCKS: Create new text block if needed
+                    if current_text_block is None:
+                        current_text_block = await self._create_content_block(
+                            session_id=session_id,
+                            block_type=ContentBlockType.ASSISTANT_TEXT,
+                            author=ContentBlockAuthor.ASSISTANT,
+                            content={"text": ""},
+                            metadata={"streaming": True, "agent_mode": True}
+                        )
+                        assistant_content = ""
+                        text_block_has_content = False
+                        print(f"[AGENT] Created NEW text block {current_text_block.id} for final_answer")
+
+                        try:
+                            await self.websocket.send_json({
+                                "type": "assistant_text_start",
+                                "block_id": current_text_block.id,
+                                "sequence_number": current_text_block.sequence_number
+                            })
+                        except:
+                            print(f"[AGENT] WebSocket disconnected during assistant_text_start")
+
                     assistant_content += answer
+                    text_block_has_content = True
                     chunks_since_commit += 1
                     print(f"[AGENT] Final Answer: {answer[:100]}...")
 
@@ -1074,17 +1160,18 @@ class ChatWebSocketHandler:
                         await self.websocket.send_json({
                             "type": "chunk",
                             "content": answer,
-                            "block_id": assistant_block.id
+                            "block_id": current_text_block.id
                         })
                     except:
                         print(f"[AGENT] WebSocket disconnected during final_answer, continuing...")
 
                     # Batched commit: only commit periodically
-                    assistant_block.content = {"text": assistant_content}
-                    if chunks_since_commit >= CHUNK_COMMIT_INTERVAL:
-                        await self._safe_commit()
-                        chunks_since_commit = 0
-                        print(f"[AGENT] Committed content update ({len(assistant_content)} chars)")
+                    if current_text_block:
+                        current_text_block.content = {"text": assistant_content}
+                        if chunks_since_commit >= CHUNK_COMMIT_INTERVAL:
+                            await self._safe_commit()
+                            chunks_since_commit = 0
+                            print(f"[AGENT] Committed content update ({len(assistant_content)} chars)")
 
                 elif event_type == "error":
                     # Error occurred
@@ -1121,30 +1208,57 @@ class ChatWebSocketHandler:
         print(f"[AGENT] Has error: {has_error}")
         print(f"[AGENT] Cancelled: {cancelled}")
 
-        # Update the content block with final content
-        assistant_block.content = {"text": assistant_content}
-        assistant_block.block_metadata = {
-            "streaming": False,
-            "agent_mode": True,
-            "has_error": has_error,
-            "cancelled": cancelled
-        }
-        await self._safe_commit()
-        print(f"[AGENT] Final block saved with ID: {assistant_block.id}, Content length: {len(assistant_content)} chars")
+        # MULTIPLE TEXT BLOCKS: Finalize the current text block (if any)
+        if current_text_block and text_block_has_content:
+            current_text_block.content = {"text": assistant_content}
+            current_text_block.block_metadata = {
+                "streaming": False,
+                "agent_mode": True,
+                "has_error": has_error,
+                "cancelled": cancelled
+            }
+            await self._safe_commit()
+            print(f"[AGENT] Final text block saved with ID: {current_text_block.id}, Content length: {len(assistant_content)} chars")
+
+            # Send completion for this block (final - no more content)
+            try:
+                await self.websocket.send_json({
+                    "type": "assistant_text_end",
+                    "block_id": current_text_block.id,
+                    "has_error": has_error,
+                    "cancelled": cancelled,
+                    "is_final": True  # Indicates this is the last text block
+                })
+            except:
+                print(f"[AGENT] WebSocket disconnected, cannot send end message")
+        elif current_text_block and not text_block_has_content:
+            # Empty text block - delete it
+            await self.db.delete(current_text_block)
+            await self._safe_commit()
+            print(f"[AGENT] Deleted empty text block {current_text_block.id}")
+
+            # Still send final signal
+            try:
+                await self.websocket.send_json({
+                    "type": "agent_complete",
+                    "has_error": has_error,
+                    "cancelled": cancelled
+                })
+            except:
+                print(f"[AGENT] WebSocket disconnected, cannot send agent_complete")
+        elif current_text_block is None:
+            # No text block at all (tools ran without any text after last finalization)
+            try:
+                await self.websocket.send_json({
+                    "type": "agent_complete",
+                    "has_error": has_error,
+                    "cancelled": cancelled
+                })
+            except:
+                print(f"[AGENT] WebSocket disconnected, cannot send agent_complete")
 
         # Mark as finalized in streaming manager
         await streaming_manager.mark_finalized(session_id)
-
-        # Send completion
-        try:
-            await self.websocket.send_json({
-                "type": "assistant_text_end",
-                "block_id": assistant_block.id,
-                "has_error": has_error,
-                "cancelled": cancelled
-            })
-        except:
-            print(f"[AGENT] WebSocket disconnected, cannot send end message")
 
         # Mark task as completed in registry
         status = 'cancelled' if cancelled else ('error' if has_error else 'completed')
@@ -1159,8 +1273,8 @@ class ChatWebSocketHandler:
             del _stream_states[session_id]
             print(f"[AGENT] Cleared stream state for session {session_id}")
 
-        # Return the assistant block so exception handler can access it
-        return assistant_block
+        # Return the first assistant block (or current one) for backwards compatibility
+        return assistant_block if assistant_block else current_text_block
 
     async def _get_conversation_history(
         self,

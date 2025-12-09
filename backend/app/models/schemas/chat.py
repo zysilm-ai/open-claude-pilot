@@ -27,6 +27,7 @@ class ChatSessionResponse(ChatSessionBase):
     id: str
     project_id: str
     created_at: datetime
+    updated_at: datetime
     container_id: str | None
     status: ChatSessionStatus
     environment_type: str | None = Field(None, description="Environment type if set up (python3.11, nodejs, etc.)")
