@@ -1,6 +1,6 @@
 <div align="center">
 
-# BreezeRun
+<img src="docs/images/logo.png" alt="BreezeRun" width="400">
 
 **Run your code like a breeze** - Self-hosted AI assistant with web interface, integrated autonomous agents and sandboxed execution
 
