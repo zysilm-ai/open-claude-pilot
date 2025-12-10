@@ -7,7 +7,7 @@ on:
     branches: [main, develop]
 
 env:
-  PYTHON_VERSION: "3.13"
+  PYTHON_VERSION: "3.12"
   NODE_VERSION: "20"
   # Test environment variables
   MASTER_ENCRYPTION_KEY: "test_key_for_ci_testing_32bytes!"

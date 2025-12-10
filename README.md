@@ -52,6 +52,54 @@ Agents tackle challenging tasks like video encoding with FFmpeg, automatically r
 
 ![Complex workflow](docs/images/complex-workflow.png)
 
+## Quick Start
+
+The easiest way to get started is using our start scripts that automatically install all dependencies and start the services:
+
+**macOS / Linux:**
+```bash
+git clone https://github.com/zysoong/breezerun.git
+cd breezerun
+chmod +x start.sh
+./start.sh
+```
+
+**Windows (PowerShell as Administrator):**
+```powershell
+git clone https://github.com/zysoong/breezerun.git
+cd breezerun
+powershell -ExecutionPolicy Bypass -File start.ps1
+```
+
+The start script will:
+- Install Python, Node.js, Poetry, and Docker (if not present)
+- Install all backend and frontend dependencies
+- Create `.env` file with auto-generated encryption key
+- Build Docker sandbox images (use `--skip-docker` to skip)
+- Start both backend and frontend servers
+
+Then open http://localhost:5173 in your browser.
+
+**Setup only (without starting services):**
+```bash
+# macOS / Linux
+./start.sh --no-start
+
+# Windows
+powershell -ExecutionPolicy Bypass -File start.ps1 -NoStart
+```
+
+Then start the servers manually:
+```bash
+# Terminal 1: Start backend
+cd backend
+poetry run python -m app.main
+
+# Terminal 2: Start frontend
+cd frontend
+npm run dev
+```
+
 ## Features
 
 ### Autonomous Agents
@@ -102,16 +150,18 @@ Use any LLM via LiteLLM:
 - Ollama
 - Groq, Together, and 100+ more
 
-## Quick Start
+## Manual Installation
+
+If you prefer manual setup instead of using the setup scripts:
 
 ### Prerequisites
 
-- Python 3.11+
+- Python 3.12+
 - Node.js 18+
-- Docker 20.10+
+- Docker 20.10+ (optional, for sandboxed execution)
 - An LLM API key (OpenAI, Anthropic, etc.)
 
-### Installation
+### Steps
 
 ```bash
 # Clone the repository
@@ -120,16 +170,15 @@ cd breezerun
 
 # Backend setup
 cd backend
-python -m venv venv
-source venv/bin/activate  # Windows: venv\Scripts\activate
-pip install -r requirements.txt
+pip install poetry
+poetry install
 
-# Configure API keys
+# Create .env file
 cp .env.example .env
-# Edit .env and add your API keys
+# Edit .env and add your MASTER_ENCRYPTION_KEY (or let the app auto-generate one)
 
 # Start backend
-python -m app.main
+poetry run python -m app.main
 
 # Frontend setup (new terminal)
 cd frontend
