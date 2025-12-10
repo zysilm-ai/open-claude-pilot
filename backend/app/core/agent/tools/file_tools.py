@@ -171,6 +171,18 @@ class FileReadTool(Tool):
                 metadata["image_data"] = content  # Full base64 data URI
                 metadata["filename"] = filename
                 metadata["mime_type"] = mime_type
+            elif is_binary:
+                filename = path.split("/")[-1]
+                mime_type = content.split(";")[0].replace("data:", "")
+                data_size_kb = len(content) // 1024
+                output_msg = (
+                    f"Successfully read file: {path} ({data_size_kb}KB, {mime_type})\n"
+                    f"This is a binary file. User can download it from the workspace files panel."
+                )
+
+                metadata["type"] = "binary"  # or "others"
+                metadata["filename"] = filename
+                metadata["mime_type"] = mime_type
             else:
                 # Format text content with line numbers for easy reference
                 # This is essential for using edit_lines tool
