@@ -12,7 +12,7 @@ BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
 # Configuration
-PYTHON_VERSION="3.13"
+PYTHON_VERSION="3.12"
 NODE_VERSION="20"
 
 print_header() {

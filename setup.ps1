@@ -9,7 +9,7 @@ param(
 $ErrorActionPreference = "Stop"
 
 # Configuration
-$PYTHON_VERSION = "3.13"
+$PYTHON_VERSION = "3.12"
 $NODE_VERSION = "20"
 
 function Write-Header {
